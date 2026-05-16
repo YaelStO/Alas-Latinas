@@ -1,0 +1,18 @@
+{
+  "name": "backend-stellar-api",
+  "version": "1.0.0",
+  "description": "API para interactuar con contrato inteligente Stellar",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "start:python": "python3 app.py",
+    "dev": "node index.js",
+    "dev:python": "python3 app.py"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.6.0",
+    "bcrypt": "^5.1.1",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

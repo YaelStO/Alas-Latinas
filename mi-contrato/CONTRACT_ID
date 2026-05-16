@@ -1,0 +1,14 @@
+CONTRACT_ID=CCK5C6NBWBPMATNCGL5O6DI6QRELKK5K3KUXZOOSJXJM4OL6KZQTINS4
+
+# Funciones disponibles:
+# - init(admin: Address)
+# - create_package(destination: String, price: i128, capacity: u32, deposit_percent: u32) -> u64
+# - get_package(package_id: u64) -> Option<TravelPackage>
+# - create_reservation(traveler: Address, package_id: u64) -> u64
+# - get_reservation(reservation_id: u64) -> Option<Reservation>
+# - confirm_payment(reservation_id: u64)
+# - confirm_service(reservation_id: u64)
+# - process_refund(reservation_id: u64)
+# - cancel_reservation(reservation_id: u64)
+# - get_loyalty_balance(user: Address) -> i128
+# - get_reservations_by_user(user: Address) -> Vec<Reservation>
