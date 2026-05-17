@@ -29,6 +29,7 @@ export default {
   auth: {
     register: (data) => api.post('/auth/register', data),
     login: (data) => api.post('/auth/login', data),
+    google: (data) => api.post('/auth/google', data),
   },
   packages: {
     list: (params) => api.get('/packages', { params }),
@@ -60,5 +61,12 @@ export default {
   },
   admin: {
     confirmService: (data) => api.post('/admin/confirm-service', data),
+    getUsers: () => api.get('/admin/users'),
+    getPackages: () => api.get('/admin/packages'),
+    updatePackage: (id, data) => api.put(`/admin/packages/${id}`, data),
+    deletePackage: (id) => api.delete(`/admin/packages/${id}`),
+    getReservations: (params) => api.get('/admin/reservations', { params }),
+    confirmPayment: (data) => api.post('/admin/confirm-payment', data),
+    processRefund: (data) => api.post('/admin/process-refund', data),
   },
 }

@@ -7,6 +7,10 @@ import PackageDetail from '../views/PackageDetail.vue'
 import MyReservations from '../views/MyReservations.vue'
 import Favorites from '../views/Favorites.vue'
 import Dashboard from '../views/Dashboard.vue'
+import AdminDashboard from '../views/admin/AdminDashboard.vue'
+import AdminPackages from '../views/admin/AdminPackages.vue'
+import AdminReservations from '../views/admin/AdminReservations.vue'
+import AdminUsers from '../views/admin/AdminUsers.vue'
 
 const routes = [
   { path: '/', name: 'Home', component: Home },
@@ -17,6 +21,10 @@ const routes = [
   { path: '/reservations', name: 'MyReservations', component: MyReservations, meta: { requiresAuth: true } },
   { path: '/favorites', name: 'Favorites', component: Favorites, meta: { requiresAuth: true } },
   { path: '/dashboard', name: 'Dashboard', component: Dashboard, meta: { requiresAuth: true } },
+  { path: '/admin', name: 'AdminDashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
+  { path: '/admin/packages', name: 'AdminPackages', component: AdminPackages, meta: { requiresAuth: true, requiresAdmin: true } },
+  { path: '/admin/reservations', name: 'AdminReservations', component: AdminReservations, meta: { requiresAuth: true, requiresAdmin: true } },
+  { path: '/admin/users', name: 'AdminUsers', component: AdminUsers, meta: { requiresAuth: true, requiresAdmin: true } },
 ]
 
 const router = createRouter({
@@ -26,8 +34,11 @@ const router = createRouter({
 
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
+  const user = JSON.parse(localStorage.getItem('user') || 'null')
   if (to.meta.requiresAuth && !token) {
     next('/login')
+  } else if (to.meta.requiresAdmin && (!user || !user.email?.endsWith('@admin.com'))) {
+    next('/')
   } else {
     next()
   }

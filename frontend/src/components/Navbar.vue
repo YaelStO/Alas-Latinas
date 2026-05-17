@@ -25,6 +25,7 @@ function handleLogout() {
         <router-link to="/reservations" class="nav-link">Mis Reservas</router-link>
         <router-link to="/favorites" class="nav-link">Favoritos</router-link>
         <router-link to="/dashboard" class="nav-link">Dashboard</router-link>
+        <router-link v-if="auth.isAdmin" to="/admin" class="nav-link admin-link">Admin</router-link>
         <span class="nav-user">{{ auth.user?.name }}</span>
         <button class="btn-logout" @click="handleLogout">Cerrar Sesión</button>
       </template>
@@ -88,4 +89,7 @@ function handleLogout() {
   font-weight: 600;
 }
 .btn-register:hover { background: #29b6f6; color: #1a1a2e !important; }
+.admin-link { color: #ffd54f !important; font-weight: 600; }
+.admin-link:hover { background: rgba(255, 213, 79, 0.15) !important; }
+.router-link-exact-active.admin-link { color: #ffd54f !important; background: rgba(255, 213, 79, 0.2) !important; }
 </style>

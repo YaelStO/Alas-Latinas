@@ -1,14 +1,17 @@
 const express = require('express');
 const mysql = require('mysql2/promise');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const { execSync } = require('child_process');
 const jwt = require('jsonwebtoken');
+const { Keypair } = require('@stellar/stellar-sdk');
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 
 const CONTRACT_ID = process.env.CONTRACT_ID || 'CCK5C6NBWBPMATNCGL5O6DI6QRELKK5K3KUXZOOSJXJM4OL6KZQTINS4';
 const NETWORK = process.env.STELLAR_NETWORK || 'testnet';
@@ -45,6 +48,67 @@ async function authenticateToken(req, res, next) {
         next();
     } catch (err) {
         return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+}
+
+async function authenticateAdmin(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (!token) {
+        return res.status(401).json({ error: 'Authentication required' });
+    }
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (!decoded.email || !decoded.email.endsWith('@admin.com')) {
+            return res.status(403).json({ error: 'Admin access required' });
+        }
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+}
+
+function generateStellarKeypair(provider, identifier) {
+    const salt = 'stellar-social-v1';
+    const combined = `${provider}:${identifier}:${salt}`;
+    const hash = crypto.createHash('sha256').update(combined).digest();
+    return Keypair.fromRawEd25519Seed(hash);
+}
+
+function decodeGoogleJWT(token) {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) throw new Error('Invalid JWT format');
+        const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+        if (!payload.iss || (payload.iss !== 'https://accounts.google.com' && payload.iss !== 'accounts.google.com')) {
+            throw new Error('Invalid token issuer');
+        }
+        if (GOOGLE_CLIENT_ID && payload.aud !== GOOGLE_CLIENT_ID) {
+            throw new Error('Invalid token audience');
+        }
+        if (!payload.exp || payload.exp < Date.now() / 1000) {
+            throw new Error('Token expired');
+        }
+        if (!payload.sub || !payload.email) {
+            throw new Error('Missing user info in token');
+        }
+        return payload;
+    } catch (err) {
+        throw new Error(`Token verification failed: ${err.message}`);
+    }
+}
+
+async function fundTestnetAccount(publicKey) {
+    try {
+        const response = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`);
+        if (!response.ok) throw new Error(`Friendbot responded with ${response.status}`);
+        console.log('Account funded with testnet XLM:', publicKey);
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        return true;
+    } catch (error) {
+        console.warn('Friendbot funding warning:', error.message);
+        return false;
     }
 }
 
@@ -116,6 +180,56 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/auth/google', async (req, res) => {
+    try {
+        const { credential } = req.body;
+        if (!credential) {
+            return res.status(400).json({ error: 'Google credential is required' });
+        }
+
+        const googleUser = decodeGoogleJWT(credential);
+        const { sub, email, name, picture } = googleUser;
+
+        const keypair = generateStellarKeypair('google', email);
+        const stellarAddress = keypair.publicKey();
+
+        const [existing] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+
+        if (existing.length > 0) {
+            const user = existing[0];
+            if (!user.stellar_address) {
+                await pool.query('UPDATE users SET stellar_address = ? WHERE id = ?', [stellarAddress, user.id]);
+                user.stellar_address = stellarAddress;
+            }
+            const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+            return res.json({
+                user: { id: user.id, name: user.name, email: user.email, stellar_address: user.stellar_address, loyalty_points: user.loyalty_points },
+                token, isNew: false
+            });
+        }
+
+        const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10);
+        const [result] = await pool.query(
+            'INSERT INTO users (name, email, password_hash, stellar_address) VALUES (?, ?, ?, ?)',
+            [name || 'Usuario', email, passwordHash, stellarAddress]
+        );
+
+        await fundTestnetAccount(stellarAddress);
+
+        const [userRows] = await pool.query(
+            'SELECT id, name, email, stellar_address, loyalty_points FROM users WHERE id = ?',
+            [result.insertId]
+        );
+        const user = userRows[0];
+        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+
+        res.status(201).json({ user, token, isNew: true });
+    } catch (error) {
+        console.error('Google auth error:', error);
+        res.status(401).json({ error: error.message || 'Google authentication failed' });
     }
 });
 
@@ -520,7 +634,7 @@ app.get('/api/loyalty', authenticateToken, async (req, res) => {
 // =============================================
 // ADMIN ENDPOINTS
 // =============================================
-app.post('/api/admin/confirm-service', authenticateToken, async (req, res) => {
+app.post('/api/admin/confirm-service', authenticateAdmin, async (req, res) => {
     try {
         const { reservation_id } = req.body;
         if (!reservation_id) {
@@ -554,11 +668,205 @@ app.post('/api/admin/confirm-service', authenticateToken, async (req, res) => {
     }
 });
 
+// =============================================
+// ADMIN ENDPOINTS
+// =============================================
+app.get('/api/admin/users', authenticateAdmin, async (req, res) => {
+    try {
+        const [users] = await pool.query(
+            `SELECT u.id, u.name, u.email, u.stellar_address, u.loyalty_points, u.created_at,
+                    COUNT(DISTINCT r.id) as total_reservations,
+                    COUNT(DISTINCT CASE WHEN r.status = 'completed' THEN r.id END) as completed_reservations
+             FROM users u
+             LEFT JOIN reservations r ON r.user_id = u.id
+             GROUP BY u.id
+             ORDER BY u.created_at DESC`
+        );
+        res.json({ users });
+    } catch (error) {
+        console.error('Admin get users error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/admin/packages', authenticateAdmin, async (req, res) => {
+    try {
+        const [packages] = await pool.query(
+            `SELECT p.*, COUNT(DISTINCT r.id) as total_reservations,
+                    COUNT(DISTINCT CASE WHEN r.status IN ('confirmed','completed') THEN r.id END) as active_reservations
+             FROM travel_packages p
+             LEFT JOIN reservations r ON r.package_id = p.id
+             GROUP BY p.id
+             ORDER BY p.created_at DESC`
+        );
+        res.json({ packages });
+    } catch (error) {
+        console.error('Admin get packages error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.put('/api/admin/packages/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const { destination, description, start_date, end_date, capacity, price, deposit_percent, image_url, is_active } = req.body;
+        const [existing] = await pool.query('SELECT * FROM travel_packages WHERE id = ?', [req.params.id]);
+        if (existing.length === 0) {
+            return res.status(404).json({ error: 'Package not found' });
+        }
+
+        const pkg = existing[0];
+        const updates = [];
+        const params = [];
+
+        if (destination !== undefined) { updates.push('destination = ?'); params.push(destination); }
+        if (description !== undefined) { updates.push('description = ?'); params.push(description); }
+        if (start_date !== undefined) { updates.push('start_date = ?'); params.push(start_date); }
+        if (end_date !== undefined) { updates.push('end_date = ?'); params.push(end_date); }
+        if (capacity !== undefined) {
+            const oldCap = pkg.capacity;
+            const diff = capacity - oldCap;
+            const newAvailable = pkg.available_slots + diff;
+            updates.push('capacity = ?', 'available_slots = ?');
+            params.push(capacity, newAvailable >= 0 ? newAvailable : 0);
+        }
+        if (price !== undefined) { updates.push('price = ?'); params.push(price); }
+        if (deposit_percent !== undefined) { updates.push('deposit_percent = ?'); params.push(deposit_percent); }
+        if (image_url !== undefined) { updates.push('image_url = ?'); params.push(image_url); }
+        if (is_active !== undefined) { updates.push('is_active = ?'); params.push(is_active); }
+
+        if (updates.length === 0) {
+            return res.json({ message: 'No changes' });
+        }
+
+        params.push(req.params.id);
+        await pool.query(`UPDATE travel_packages SET ${updates.join(', ')} WHERE id = ?`, params);
+
+        const [updated] = await pool.query('SELECT * FROM travel_packages WHERE id = ?', [req.params.id]);
+        res.json({ package: updated[0] });
+    } catch (error) {
+        console.error('Admin update package error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.delete('/api/admin/packages/:id', authenticateAdmin, async (req, res) => {
+    try {
+        const [existing] = await pool.query('SELECT * FROM travel_packages WHERE id = ?', [req.params.id]);
+        if (existing.length === 0) {
+            return res.status(404).json({ error: 'Package not found' });
+        }
+        await pool.query('UPDATE travel_packages SET is_active = FALSE WHERE id = ?', [req.params.id]);
+        res.json({ message: 'Package deactivated' });
+    } catch (error) {
+        console.error('Admin deactivate package error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.get('/api/admin/reservations', authenticateAdmin, async (req, res) => {
+    try {
+        const { status } = req.query;
+        let query = `SELECT r.*, u.name as user_name, u.email as user_email, p.destination, p.start_date, p.end_date
+                     FROM reservations r
+                     JOIN users u ON r.user_id = u.id
+                     JOIN travel_packages p ON r.package_id = p.id
+                     WHERE 1=1`;
+        const params = [];
+        if (status) {
+            params.push(status);
+            query += ' AND r.status = ?';
+        }
+        query += ' ORDER BY r.created_at DESC';
+        const [rows] = await pool.query(query, params);
+        res.json({ reservations: rows });
+    } catch (error) {
+        console.error('Admin get reservations error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/admin/confirm-payment', authenticateAdmin, async (req, res) => {
+    try {
+        const { reservation_id } = req.body;
+        if (!reservation_id) {
+            return res.status(400).json({ error: 'Reservation ID is required' });
+        }
+
+        const [rows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [reservation_id]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Reservation not found' });
+        }
+
+        const reservation = rows[0];
+        if (reservation.status !== 'pending') {
+            return res.status(400).json({ error: 'Reservation is not pending' });
+        }
+
+        await pool.query("UPDATE reservations SET status = 'confirmed' WHERE id = ?", [reservation_id]);
+        await pool.query(
+            "UPDATE payment_log SET status = 'completed' WHERE reservation_id = ? AND transaction_type = 'deposit' AND status = 'pending'",
+            [reservation_id]
+        );
+
+        try {
+            invokeContract('confirm_payment', `--arg-u64 ${reservation.contract_reservation_id || 1}`);
+        } catch (contractError) {
+            console.warn('Contract payment confirmation warning:', contractError.message);
+        }
+
+        res.json({ message: 'Payment confirmed by admin', reservation_id });
+    } catch (error) {
+        console.error('Admin confirm payment error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+app.post('/api/admin/process-refund', authenticateAdmin, async (req, res) => {
+    try {
+        const { reservation_id } = req.body;
+        if (!reservation_id) {
+            return res.status(400).json({ error: 'Reservation ID is required' });
+        }
+
+        const [rows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [reservation_id]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Reservation not found' });
+        }
+
+        const reservation = rows[0];
+        if (reservation.status === 'completed') {
+            return res.status(400).json({ error: 'Cannot refund completed reservation' });
+        }
+        if (reservation.status === 'refunded') {
+            return res.status(400).json({ error: 'Already refunded' });
+        }
+
+        await pool.query("UPDATE reservations SET status = 'refunded' WHERE id = ?", [reservation_id]);
+        await pool.query('UPDATE travel_packages SET available_slots = available_slots + 1 WHERE id = ?', [reservation.package_id]);
+        await pool.query(
+            "INSERT INTO payment_log (reservation_id, transaction_type, amount, status) VALUES (?, 'refund', ?, 'completed')",
+            [reservation_id, reservation.deposit_amount]
+        );
+
+        try {
+            invokeContract('process_refund', `--arg-u64 ${reservation.contract_reservation_id || 1}`);
+        } catch (contractError) {
+            console.warn('Contract refund warning:', contractError.message);
+        }
+
+        res.json({ message: 'Refund processed by admin', reservation_id });
+    } catch (error) {
+        console.error('Admin process refund error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Tourism Blockchain API running on http://localhost:${PORT}`);
     console.log('Available endpoints:');
     console.log('  POST   /api/auth/register');
     console.log('  POST   /api/auth/login');
+    console.log('  POST   /api/auth/google');
     console.log('  GET    /api/packages');
     console.log('  GET    /api/packages/:id');
     console.log('  POST   /api/packages');
@@ -574,4 +882,11 @@ app.listen(PORT, () => {
     console.log('  DELETE /api/favorites/:package_id');
     console.log('  GET    /api/loyalty');
     console.log('  POST   /api/admin/confirm-service');
+    console.log('  GET    /api/admin/users');
+    console.log('  GET    /api/admin/packages');
+    console.log('  PUT    /api/admin/packages/:id');
+    console.log('  DELETE /api/admin/packages/:id');
+    console.log('  GET    /api/admin/reservations');
+    console.log('  POST   /api/admin/confirm-payment');
+    console.log('  POST   /api/admin/process-refund');
 });
