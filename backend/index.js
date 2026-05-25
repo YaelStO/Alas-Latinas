@@ -1,5 +1,7 @@
+require('dotenv').config();
+
 const express = require('express');
-const mysql = require('mysql2/promise');
+const cors = require('cors');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
@@ -7,7 +9,58 @@ const jwt = require('jsonwebtoken');
 const { Keypair } = require('@stellar/stellar-sdk');
 
 const app = express();
+app.use(cors());
 app.use(express.json());
+
+function newId() {
+    return crypto.randomUUID();
+}
+
+function dbErrorResponse(res, error, context) {
+    console.error(`${context} error:`, error);
+    if (error.code === 'ER_ACCESS_DENIED_ERROR') {
+        return res.status(503).json({
+            error: 'No se puede conectar a MySQL. Revisa DB_USER y DB_PASSWORD en backend/.env (usa tu usuario root de MySQL local).',
+        });
+    }
+    if (error.code === 'ER_BAD_DB_ERROR') {
+        return res.status(503).json({
+            error: 'La base de datos no existe. Ejecuta: mysql -u root -p < backend/schema.sql',
+        });
+    }
+    if (error.code === 'ECONNREFUSED') {
+        return res.status(503).json({
+            error: 'MySQL no está encendido. Inicia el servicio MySQL en Windows o ejecuta npm run db:up (Docker).',
+        });
+    }
+    return res.status(500).json({ error: 'Internal server error' });
+}
+
+function signToken(user) {
+    return jwt.sign(
+        {
+            id: user.id,
+            email: user.email,
+            stellar_address: user.stellar_address || null,
+        },
+        JWT_SECRET,
+        { expiresIn: '7d' }
+    );
+}
+
+async function getUserById(id) {
+    const [rows] = await pool.query(
+        'SELECT id, name, email, stellar_address, loyalty_points FROM users WHERE id = ?',
+        [id]
+    );
+    return rows[0] || null;
+}
+
+async function resolveStellarAddress(userFromToken) {
+    if (userFromToken.stellar_address) return userFromToken.stellar_address;
+    const user = await getUserById(userFromToken.id);
+    return user?.stellar_address || null;
+}
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key-change-in-production';
@@ -16,14 +69,7 @@ const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const CONTRACT_ID = process.env.CONTRACT_ID || 'CCK5C6NBWBPMATNCGL5O6DI6QRELKK5K3KUXZOOSJXJM4OL6KZQTINS4';
 const NETWORK = process.env.STELLAR_NETWORK || 'testnet';
 
-const pool = mysql.createPool({
-    host: process.env.DB_HOST || 'localhost',
-    user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASSWORD || '',
-    database: process.env.DB_NAME || 'turismo_blockchain',
-    waitForConnections: true,
-    connectionLimit: 10,
-});
+const pool = require('./lib/storage');
 
 function invokeContract(functionName, args) {
     try {
@@ -112,6 +158,9 @@ async function fundTestnetAccount(publicKey) {
     }
 }
 
+const { registerWebAuthnRoutes } = require('./webauthn-routes');
+registerWebAuthnRoutes(app, { pool, authenticateToken, signToken, getUserById, newId });
+
 // =============================================
 // AUTH ENDPOINTS
 // =============================================
@@ -128,22 +177,23 @@ app.post('/api/auth/register', async (req, res) => {
         }
 
         const password_hash = await bcrypt.hash(password, 10);
-        const [result] = await pool.query(
-            'INSERT INTO users (name, email, password_hash, stellar_address) VALUES (?, ?, ?, ?)',
-            [name, email, password_hash, stellar_address || null]
+        let stellarAddress = stellar_address;
+        if (!stellarAddress) {
+            stellarAddress = generateStellarKeypair('email', email).publicKey();
+        }
+
+        const userId = newId();
+        await pool.query(
+            'INSERT INTO users (id, name, email, password_hash, stellar_address) VALUES (?, ?, ?, ?, ?)',
+            [userId, name, email, password_hash, stellarAddress]
         );
 
-        const [userRows] = await pool.query(
-            'SELECT id, name, email, stellar_address, loyalty_points FROM users WHERE id = ?',
-            [result.insertId]
-        );
-        const user = userRows[0];
-        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+        const user = await getUserById(userId);
+        const token = signToken(user);
 
         res.status(201).json({ user, token });
     } catch (error) {
-        console.error('Register error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        return dbErrorResponse(res, error, 'Register');
     }
 });
 
@@ -165,7 +215,7 @@ app.post('/api/auth/login', async (req, res) => {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+        const token = signToken(user);
 
         res.json({
             user: {
@@ -178,8 +228,7 @@ app.post('/api/auth/login', async (req, res) => {
             token,
         });
     } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        return dbErrorResponse(res, error, 'Login');
     }
 });
 
@@ -204,7 +253,7 @@ app.post('/api/auth/google', async (req, res) => {
                 await pool.query('UPDATE users SET stellar_address = ? WHERE id = ?', [stellarAddress, user.id]);
                 user.stellar_address = stellarAddress;
             }
-            const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+            const token = signToken(user);
             return res.json({
                 user: { id: user.id, name: user.name, email: user.email, stellar_address: user.stellar_address, loyalty_points: user.loyalty_points },
                 token, isNew: false
@@ -212,19 +261,16 @@ app.post('/api/auth/google', async (req, res) => {
         }
 
         const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10);
-        const [result] = await pool.query(
-            'INSERT INTO users (name, email, password_hash, stellar_address) VALUES (?, ?, ?, ?)',
-            [name || 'Usuario', email, passwordHash, stellarAddress]
+        const userId = newId();
+        await pool.query(
+            'INSERT INTO users (id, name, email, password_hash, stellar_address) VALUES (?, ?, ?, ?, ?)',
+            [userId, name || 'Usuario', email, passwordHash, stellarAddress]
         );
 
         await fundTestnetAccount(stellarAddress);
 
-        const [userRows] = await pool.query(
-            'SELECT id, name, email, stellar_address, loyalty_points FROM users WHERE id = ?',
-            [result.insertId]
-        );
-        const user = userRows[0];
-        const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+        const user = await getUserById(userId);
+        const token = signToken(user);
 
         res.status(201).json({ user, token, isNew: true });
     } catch (error) {
@@ -288,13 +334,14 @@ app.post('/api/packages', authenticateToken, async (req, res) => {
             return res.status(400).json({ error: 'Missing required fields' });
         }
 
-        const [result] = await pool.query(
-            `INSERT INTO travel_packages (destination, description, start_date, end_date, capacity, available_slots, price, deposit_percent, image_url)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [destination, description, start_date, end_date, capacity, capacity, price, deposit_percent || 20, image_url]
+        const pkgId = newId();
+        await pool.query(
+            `INSERT INTO travel_packages (id, destination, description, start_date, end_date, capacity, available_slots, price, deposit_percent, image_url)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [pkgId, destination, description, start_date, end_date, capacity, capacity, price, deposit_percent || 20, image_url]
         );
 
-        const [pkgRows] = await pool.query('SELECT * FROM travel_packages WHERE id = ?', [result.insertId]);
+        const [pkgRows] = await pool.query('SELECT * FROM travel_packages WHERE id = ?', [pkgId]);
         const pkg = pkgRows[0];
 
         try {
@@ -337,19 +384,25 @@ app.post('/api/reservations', authenticateToken, async (req, res) => {
         const deposit = (parseFloat(pkg.price) * pkg.deposit_percent) / 100;
         const totalPrice = parseFloat(pkg.price);
 
-        const [resResult] = await pool.query(
-            `INSERT INTO reservations (user_id, package_id, total_price, deposit_amount, status) VALUES (?, ?, ?, ?, 'pending')`,
-            [req.user.id, package_id, totalPrice, deposit]
+        const stellarAddress = await resolveStellarAddress(req.user);
+        if (!stellarAddress) {
+            return res.status(400).json({ error: 'Cuenta Stellar no configurada. Cierra sesión e inicia de nuevo.' });
+        }
+
+        const resId = newId();
+        await pool.query(
+            `INSERT INTO reservations (id, user_id, package_id, total_price, deposit_amount, status) VALUES (?, ?, ?, ?, ?, 'pending')`,
+            [resId, req.user.id, package_id, totalPrice, deposit]
         );
 
-        const [reservationRows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [resResult.insertId]);
+        const [reservationRows] = await pool.query('SELECT * FROM reservations WHERE id = ?', [resId]);
         const reservation = reservationRows[0];
 
         await pool.query('UPDATE travel_packages SET available_slots = available_slots - 1 WHERE id = ?', [package_id]);
 
         try {
             const contractResId = invokeContract('create_reservation',
-                `--arg-addr ${req.user.stellar_address || 'GAA...' } --arg-u64 ${pkg.contract_package_id || 1}`
+                `--arg-addr ${stellarAddress} --arg-u64 ${pkg.contract_package_id || 1}`
             );
             await pool.query('UPDATE reservations SET contract_reservation_id = ? WHERE id = ?', [contractResId, reservation.id]);
             reservation.contract_reservation_id = contractResId;
@@ -526,12 +579,13 @@ app.post('/api/reviews', authenticateToken, async (req, res) => {
             }
         }
 
-        const [result] = await pool.query(
-            `INSERT INTO reviews (user_id, package_id, reservation_id, rating, comment) VALUES (?, ?, ?, ?, ?)`,
-            [req.user.id, package_id, reservation_id || null, rating, comment || null]
+        const reviewId = newId();
+        await pool.query(
+            `INSERT INTO reviews (id, user_id, package_id, reservation_id, rating, comment) VALUES (?, ?, ?, ?, ?, ?)`,
+            [reviewId, req.user.id, package_id, reservation_id || null, rating, comment || null]
         );
 
-        const [reviewRows] = await pool.query('SELECT * FROM reviews WHERE id = ?', [result.insertId]);
+        const [reviewRows] = await pool.query('SELECT * FROM reviews WHERE id = ?', [reviewId]);
         res.status(201).json({ review: reviewRows[0] });
     } catch (error) {
         console.error('Create review error:', error);
@@ -573,11 +627,12 @@ app.post('/api/favorites', authenticateToken, async (req, res) => {
         }
 
         try {
-            const [result] = await pool.query(
-                `INSERT INTO favorites (user_id, package_id) VALUES (?, ?)`,
-                [req.user.id, package_id]
+            const favId = newId();
+            await pool.query(
+                `INSERT INTO favorites (id, user_id, package_id) VALUES (?, ?, ?)`,
+                [favId, req.user.id, package_id]
             );
-            const [favRows] = await pool.query('SELECT * FROM favorites WHERE id = ?', [result.insertId]);
+            const [favRows] = await pool.query('SELECT * FROM favorites WHERE id = ?', [favId]);
             res.status(201).json({ favorite: favRows[0] });
         } catch (err) {
             if (err.code === 'ER_DUP_ENTRY') {
@@ -861,12 +916,48 @@ app.post('/api/admin/process-refund', authenticateAdmin, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
+app.get('/api/health', async (req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        const [rows] = await pool.query('SELECT COUNT(*) AS packages FROM travel_packages WHERE is_active = TRUE');
+        res.json({
+            status: 'ok',
+            storage: pool.storageLabel || pool.mode,
+            contract_id: CONTRACT_ID,
+            network: NETWORK,
+            active_packages: rows[0].packages,
+        });
+    } catch (err) {
+        res.status(503).json({ status: 'error', database: 'disconnected', message: err.message });
+    }
+});
+
+async function startServer() {
+    try {
+        await pool.query('SELECT 1');
+        console.log(`Almacenamiento: ${pool.storageLabel || pool.mode}`);
+        if (pool.mode === 'web3') {
+            console.log(`Contrato Soroban (testnet): ${CONTRACT_ID}`);
+        }
+    } catch (err) {
+        console.error('Almacenamiento no disponible:', err.message);
+        if (pool.mode === 'mysql') {
+            console.error('Inicia MySQL: cd backend && npm run db:up && npm run db:seed');
+        }
+    }
+
+    app.listen(PORT, () => {
     console.log(`Tourism Blockchain API running on http://localhost:${PORT}`);
     console.log('Available endpoints:');
     console.log('  POST   /api/auth/register');
     console.log('  POST   /api/auth/login');
     console.log('  POST   /api/auth/google');
+    console.log('  GET    /api/auth/biometric/check');
+    console.log('  POST   /api/auth/biometric/register-options');
+    console.log('  POST   /api/auth/biometric/register-verify');
+    console.log('  POST   /api/auth/biometric/login-options');
+    console.log('  POST   /api/auth/biometric/login-verify');
+    console.log('  GET    /api/auth/biometric/status');
     console.log('  GET    /api/packages');
     console.log('  GET    /api/packages/:id');
     console.log('  POST   /api/packages');
@@ -889,4 +980,8 @@ app.listen(PORT, () => {
     console.log('  GET    /api/admin/reservations');
     console.log('  POST   /api/admin/confirm-payment');
     console.log('  POST   /api/admin/process-refund');
-});
+    console.log('  GET    /api/health');
+    });
+}
+
+startServer();

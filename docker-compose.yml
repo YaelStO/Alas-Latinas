@@ -1,0 +1,25 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: alas-latinas-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: turismo_root
+      MYSQL_DATABASE: turismo_blockchain
+      MYSQL_USER: turismo
+      MYSQL_PASSWORD: turismo_dev
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./backend/db/seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+      - ./backend/db/biometric-schema.sql:/docker-entrypoint-initdb.d/03-biometric.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pturismo_root"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  mysql_data:

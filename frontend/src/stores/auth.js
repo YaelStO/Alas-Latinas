@@ -34,6 +34,18 @@ export const useAuthStore = defineStore('auth', () => {
     return res.data
   }
 
+  async function biometricLogin(email) {
+    const { loginWithBiometric } = await import('../services/biometric')
+    const res = await loginWithBiometric(api, email)
+    setSession(res.data.user, res.data.token)
+    return res.data
+  }
+
+  async function registerBiometric(deviceName) {
+    const { registerBiometric: registerBio } = await import('../services/biometric')
+    return registerBio(api, deviceName)
+  }
+
   function logout() {
     user.value = null
     token.value = ''
@@ -41,5 +53,16 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('token')
   }
 
-  return { user, token, isAuthenticated, isAdmin, register, login, googleLogin, logout }
+  return {
+    user,
+    token,
+    isAuthenticated,
+    isAdmin,
+    register,
+    login,
+    googleLogin,
+    biometricLogin,
+    registerBiometric,
+    logout,
+  }
 })

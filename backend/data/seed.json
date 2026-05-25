@@ -1,0 +1,86 @@
+{
+  "users": [
+    {
+      "id": "b2000001-0000-4000-8000-000000000001",
+      "name": "Admin Turismo",
+      "email": "admin@admin.com",
+      "password_hash": "$2b$10$EdXcrTTX/kSYXHA6MleNwOlw.EjjzKM2gFoixOZVJbCGgMZSaGC4.",
+      "stellar_address": null,
+      "loyalty_points": 0,
+      "biometric_enabled": false,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "travel_packages": [
+    {
+      "id": "a1000001-0000-4000-8000-000000000001",
+      "contract_package_id": 1,
+      "destination": "Cancún",
+      "description": "Playa, arrecife y cultura maya. Paquete todo incluido.",
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-07",
+      "capacity": 40,
+      "available_slots": 40,
+      "price": 1250,
+      "deposit_percent": 20,
+      "image_url": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800",
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "a1000001-0000-4000-8000-000000000002",
+      "contract_package_id": 2,
+      "destination": "Ciudad de México",
+      "description": "Historia, gastronomía y museos en la capital.",
+      "start_date": "2026-08-15",
+      "end_date": "2026-08-20",
+      "capacity": 30,
+      "available_slots": 30,
+      "price": 890,
+      "deposit_percent": 15,
+      "image_url": "https://images.unsplash.com/photo-1518654090668-93fc06ada88e?w=800",
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "a1000001-0000-4000-8000-000000000003",
+      "contract_package_id": 3,
+      "destination": "Cartagena",
+      "description": "Ciudad amurallada, Caribe y arquitectura colonial.",
+      "start_date": "2026-09-10",
+      "end_date": "2026-09-17",
+      "capacity": 25,
+      "available_slots": 25,
+      "price": 1100,
+      "deposit_percent": 25,
+      "image_url": "https://images.unsplash.com/photo-1580654712600-7f5f7d0b8f0e?w=800",
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    },
+    {
+      "id": "a1000001-0000-4000-8000-000000000004",
+      "contract_package_id": 4,
+      "destination": "Patagonia",
+      "description": "Glaciares, trekking y naturaleza en el sur.",
+      "start_date": "2026-11-01",
+      "end_date": "2026-11-10",
+      "capacity": 15,
+      "available_slots": 15,
+      "price": 2400,
+      "deposit_percent": 30,
+      "image_url": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800",
+      "is_active": true,
+      "created_at": "2026-01-01T00:00:00.000Z",
+      "updated_at": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "reservations": [],
+  "reviews": [],
+  "favorites": [],
+  "payment_log": [],
+  "webauthn_credentials": []
+}

@@ -1,7 +1,8 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
+import { canUsePlatformBiometric } from '../services/biometric'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -10,9 +11,12 @@ const email = ref('')
 const password = ref('')
 const stellar_address = ref('')
 const error = ref('')
+const bioMsg = ref('')
+const biometricAvailable = ref(false)
 
 async function handleRegister() {
   error.value = ''
+  bioMsg.value = ''
   try {
     await auth.register({
       name: name.value,
@@ -20,11 +24,23 @@ async function handleRegister() {
       password: password.value,
       stellar_address: stellar_address.value || undefined,
     })
-    router.push('/')
+    if (biometricAvailable.value) {
+      try {
+        await auth.registerBiometric('Huella / Face ID')
+        bioMsg.value = 'Cuenta creada y biometría activada.'
+      } catch {
+        bioMsg.value = 'Cuenta creada. Activa la biometría en el Dashboard.'
+      }
+    }
+    router.push('/dashboard')
   } catch (e) {
     error.value = e.response?.data?.error || 'Error al registrarse'
   }
 }
+
+onMounted(async () => {
+  biometricAvailable.value = await canUsePlatformBiometric()
+})
 </script>
 
 <template>
@@ -32,6 +48,7 @@ async function handleRegister() {
     <div class="auth-card">
       <h2>Crear Cuenta</h2>
       <p class="auth-sub">Regístrate para comenzar a reservar</p>
+      <p v-if="biometricAvailable" class="bio-info">🔐 Tras registrarte podrás activar huella o Face ID</p>
       <form @submit.prevent="handleRegister">
         <div class="field">
           <label>Nombre</label>
@@ -50,6 +67,7 @@ async function handleRegister() {
           <input v-model="stellar_address" type="text" placeholder="G..." />
         </div>
         <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="bioMsg" class="bio-ok">{{ bioMsg }}</p>
         <button type="submit" class="btn-primary">Crear Cuenta</button>
       </form>
       <p class="auth-footer">¿Ya tienes cuenta? <router-link to="/login">Inicia sesión</router-link></p>
@@ -74,7 +92,9 @@ async function handleRegister() {
   max-width: 400px;
 }
 .auth-card h2 { margin: 0 0 0.3rem; color: #1a1a2e; }
-.auth-sub { color: #888; margin: 0 0 1.5rem; font-size: 0.9rem; }
+.auth-sub { color: #888; margin: 0 0 0.5rem; font-size: 0.9rem; }
+.bio-info { color: #0f3460; font-size: 0.85rem; margin: 0 0 1.2rem; background: #e3f2fd; padding: 0.5rem 0.75rem; border-radius: 8px; }
+.bio-ok { color: #2e7d32; font-size: 0.9rem; margin: 0 0 1rem; }
 .field { margin-bottom: 1rem; }
 .field label { display: block; margin-bottom: 0.3rem; font-weight: 500; color: #333; font-size: 0.9rem; }
 .field input {

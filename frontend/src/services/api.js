@@ -30,6 +30,13 @@ export default {
     register: (data) => api.post('/auth/register', data),
     login: (data) => api.post('/auth/login', data),
     google: (data) => api.post('/auth/google', data),
+    biometricCheck: (email) => api.get('/auth/biometric/check', { params: { email } }),
+    biometricRegisterOptions: () => api.post('/auth/biometric/register-options'),
+    biometricRegisterVerify: (data) => api.post('/auth/biometric/register-verify', data),
+    biometricLoginOptions: (data) => api.post('/auth/biometric/login-options', data),
+    biometricLoginVerify: (data) => api.post('/auth/biometric/login-verify', data),
+    biometricStatus: () => api.get('/auth/biometric/status'),
+    biometricRemove: (credentialId) => api.delete(`/auth/biometric/${credentialId}`),
   },
   packages: {
     list: (params) => api.get('/packages', { params }),

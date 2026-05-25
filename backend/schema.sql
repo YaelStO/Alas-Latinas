@@ -8,13 +8,14 @@ USE turismo_blockchain;
 -- =============================================
 -- USERS TABLE
 -- =============================================
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     name VARCHAR(100) NOT NULL,
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     stellar_address VARCHAR(56) DEFAULT NULL,
     loyalty_points BIGINT DEFAULT 0,
+    biometric_enabled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -22,7 +23,7 @@ CREATE TABLE users (
 -- =============================================
 -- TRAVEL PACKAGES TABLE
 -- =============================================
-CREATE TABLE travel_packages (
+CREATE TABLE IF NOT EXISTS travel_packages (
     id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     contract_package_id BIGINT DEFAULT NULL,
     destination VARCHAR(200) NOT NULL,
@@ -44,7 +45,7 @@ CREATE TABLE travel_packages (
 -- =============================================
 -- RESERVATIONS TABLE
 -- =============================================
-CREATE TABLE reservations (
+CREATE TABLE IF NOT EXISTS reservations (
     id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     contract_reservation_id BIGINT DEFAULT NULL,
     user_id CHAR(36) NOT NULL,
@@ -67,7 +68,7 @@ CREATE TABLE reservations (
 -- =============================================
 -- REVIEWS TABLE
 -- =============================================
-CREATE TABLE reviews (
+CREATE TABLE IF NOT EXISTS reviews (
     id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     user_id CHAR(36) NOT NULL,
     package_id CHAR(36) NOT NULL,
@@ -86,7 +87,7 @@ CREATE TABLE reviews (
 -- =============================================
 -- FAVORITES TABLE
 -- =============================================
-CREATE TABLE favorites (
+CREATE TABLE IF NOT EXISTS favorites (
     id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     user_id CHAR(36) NOT NULL,
     package_id CHAR(36) NOT NULL,
@@ -100,7 +101,7 @@ CREATE TABLE favorites (
 -- =============================================
 -- PAYMENT_LOG TABLE (Escrow tracking)
 -- =============================================
-CREATE TABLE payment_log (
+CREATE TABLE IF NOT EXISTS payment_log (
     id CHAR(36) PRIMARY KEY DEFAULT (UUID()),
     reservation_id CHAR(36) NOT NULL,
     transaction_type VARCHAR(20) NOT NULL,
@@ -110,4 +111,22 @@ CREATE TABLE payment_log (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_transaction_type CHECK (transaction_type IN ('deposit', 'full_payment', 'refund', 'loyalty_reward')),
     CONSTRAINT fk_payment_log_reservation FOREIGN KEY (reservation_id) REFERENCES reservations(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- =============================================
+-- WEBAUTHN / BIOMETRÍA (huella, Face ID, Windows Hello)
+-- =============================================
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id CHAR(36) PRIMARY KEY,
+    user_id CHAR(36) NOT NULL,
+    credential_id VARCHAR(512) NOT NULL,
+    public_key TEXT NOT NULL,
+    counter BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    device_name VARCHAR(100) DEFAULT 'Biometría',
+    transports JSON DEFAULT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_used_at TIMESTAMP NULL,
+    CONSTRAINT uq_webauthn_credential UNIQUE (credential_id),
+    CONSTRAINT fk_webauthn_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_webauthn_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

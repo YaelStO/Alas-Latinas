@@ -2,12 +2,55 @@
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import api from '../services/api'
+import { canUsePlatformBiometric } from '../services/biometric'
 
 const auth = useAuthStore()
 const loyaltyPoints = ref(0)
 const stats = ref({ total: 0, confirmed: 0, completed: 0, pending: 0 })
+const biometricStatus = ref({ enabled: false, devices: [] })
+const biometricAvailable = ref(false)
+const bioLoading = ref(false)
+const bioError = ref('')
+const bioSuccess = ref('')
+
+async function loadBiometricStatus() {
+  try {
+    const res = await api.auth.biometricStatus()
+    biometricStatus.value = res.data
+  } catch {
+    biometricStatus.value = { enabled: false, devices: [] }
+  }
+}
+
+async function enableBiometric() {
+  bioError.value = ''
+  bioSuccess.value = ''
+  bioLoading.value = true
+  try {
+    await auth.registerBiometric('Huella / Face ID')
+    bioSuccess.value = 'Biometría activada correctamente.'
+    await loadBiometricStatus()
+  } catch (e) {
+    bioError.value = e.response?.data?.error || e.message || 'No se pudo activar la biometría'
+  } finally {
+    bioLoading.value = false
+  }
+}
+
+async function removeBiometric(credentialId) {
+  bioError.value = ''
+  try {
+    await api.auth.biometricRemove(credentialId)
+    bioSuccess.value = 'Dispositivo eliminado.'
+    await loadBiometricStatus()
+  } catch (e) {
+    bioError.value = e.response?.data?.error || 'Error al eliminar'
+  }
+}
 
 onMounted(async () => {
+  biometricAvailable.value = await canUsePlatformBiometric()
+  await loadBiometricStatus()
   try {
     const [loyaltyRes, reservationsRes] = await Promise.all([
       api.loyalty.get(),
@@ -58,6 +101,30 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div v-if="biometricAvailable" class="biometric-card">
+      <h3>🔐 Autenticación biométrica</h3>
+      <p class="bio-desc">Huella dactilar, Face ID o Windows Hello para iniciar sesión sin contraseña.</p>
+      <template v-if="biometricStatus.enabled">
+        <p class="bio-on">Biometría activa en {{ biometricStatus.devices.length }} dispositivo(s)</p>
+        <ul class="device-list">
+          <li v-for="d in biometricStatus.devices" :key="d.id">
+            <span>{{ d.device_name }} — {{ new Date(d.created_at).toLocaleDateString() }}</span>
+            <button type="button" class="btn-remove" @click="removeBiometric(d.id)">Eliminar</button>
+          </li>
+        </ul>
+        <button type="button" class="btn-bio" :disabled="bioLoading" @click="enableBiometric">
+          Añadir otro dispositivo
+        </button>
+      </template>
+      <template v-else>
+        <button type="button" class="btn-bio" :disabled="bioLoading" @click="enableBiometric">
+          {{ bioLoading ? 'Configurando...' : 'Activar huella / Face ID' }}
+        </button>
+      </template>
+      <p v-if="bioError" class="bio-err">{{ bioError }}</p>
+      <p v-if="bioSuccess" class="bio-ok">{{ bioSuccess }}</p>
+    </div>
+
     <div class="quick-actions">
       <h3>Acciones Rápidas</h3>
       <div class="actions-grid">
@@ -106,4 +173,35 @@ onMounted(async () => {
   transition: transform 0.2s;
 }
 .action-card:hover { transform: translateY(-2px); }
+.biometric-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+.biometric-card h3 { margin: 0 0 0.5rem; color: #1a1a2e; }
+.bio-desc { color: #666; font-size: 0.9rem; margin: 0 0 1rem; }
+.bio-on { color: #2e7d32; font-weight: 500; margin: 0 0 0.75rem; }
+.device-list { list-style: none; padding: 0; margin: 0 0 1rem; }
+.device-list li {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.5rem 0; border-bottom: 1px solid #eee; font-size: 0.9rem;
+}
+.btn-remove {
+  background: none; border: 1px solid #ef5350; color: #ef5350;
+  padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+}
+.btn-bio {
+  padding: 0.65rem 1.25rem;
+  background: #1a1a2e;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-bio:disabled { opacity: 0.6; }
+.bio-err { color: #ef5350; font-size: 0.9rem; margin: 0.5rem 0 0; }
+.bio-ok { color: #2e7d32; font-size: 0.9rem; margin: 0.5rem 0 0; }
 </style>
