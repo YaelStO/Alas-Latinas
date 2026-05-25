@@ -72,7 +72,11 @@ async function waitForDb(config, attempts = 30) {
 }
 
 async function main() {
-    const config = {
+    const mysqlUrl = process.env.DATABASE_URL || process.env.MYSQL_URL;
+    const urlConfig = mysqlUrl
+        ? mysqlUrl + (mysqlUrl.includes('?') ? '&' : '?') + 'multipleStatements=true'
+        : null;
+    const config = urlConfig || {
         host: process.env.DB_HOST || 'localhost',
         user: process.env.DB_USER || 'turismo',
         password: process.env.DB_PASSWORD || 'turismo_dev',
@@ -93,7 +97,13 @@ async function main() {
     for (const file of sqlFiles) {
         const schemaPath = path.join(__dirname, '..', file);
         if (fs.existsSync(schemaPath)) {
-            await pool.query(fs.readFileSync(schemaPath, 'utf8'));
+            let sql = fs.readFileSync(schemaPath, 'utf8');
+            // En Railway la BD ya existe con otro nombre, ignoramos CREATE/USE
+            if (mysqlUrl) {
+                sql = sql.replace(/CREATE DATABASE .*?;/gi, '')
+                         .replace(/USE .*?;/gi, '');
+            }
+            await pool.query(sql);
             console.log(`Schema aplicado: ${file}`);
         }
     }

@@ -98,11 +98,14 @@ function renderGoogleButton() {
   }
 }
 
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
+const hasGoogleConfig = googleClientId && googleClientId !== 'your-google-client-id.apps.googleusercontent.com'
+
 onMounted(async () => {
   biometricAvailable.value = await canUsePlatformBiometric()
-  if (window.google?.accounts?.id) {
+  if (hasGoogleConfig && window.google?.accounts?.id) {
     window.google.accounts.id.initialize({
-      client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      client_id: googleClientId,
       callback: handleGoogleCredential,
       cancel_on_tap_outside: false,
     })
@@ -121,7 +124,7 @@ onMounted(async () => {
         <div class="spinner"></div>
         <span>Conectando con Google...</span>
       </div>
-      <div v-else id="google-signin-btn" class="google-btn-wrapper"></div>
+      <div v-if="hasGoogleConfig" id="google-signin-btn" class="google-btn-wrapper"></div>
 
       <div class="divider"><span>o con email</span></div>
 

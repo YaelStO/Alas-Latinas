@@ -9,7 +9,11 @@ const jwt = require('jsonwebtoken');
 const { Keypair } = require('@stellar/stellar-sdk');
 
 const app = express();
-app.use(cors());
+const FRONTEND_URL = process.env.FRONTEND_URL || '';
+app.use(cors({
+    origin: FRONTEND_URL ? [FRONTEND_URL, 'http://localhost:5173', 'http://localhost:3000'] : '*',
+    credentials: true,
+}));
 app.use(express.json());
 
 function newId() {

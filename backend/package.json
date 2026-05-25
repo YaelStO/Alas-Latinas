@@ -10,7 +10,8 @@
     "db:down": "docker compose -f ../docker-compose.yml down",
     "db:test": "node scripts/test-db.js",
     "db:seed": "node scripts/seed-db.js",
-    "db:setup": "npm run db:up && node scripts/seed-db.js"
+    "db:setup": "npm run db:up && node scripts/seed-db.js",
+    "railway:seed": "node scripts/seed-db.js"
   },
   "dependencies": {
     "@simplewebauthn/server": "^13.3.0",
