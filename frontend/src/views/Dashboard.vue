@@ -12,6 +12,12 @@ const biometricAvailable = ref(false)
 const bioLoading = ref(false)
 const bioError = ref('')
 const bioSuccess = ref('')
+const pin = ref('')
+const pinConfirm = ref('')
+const pinEnabled = ref(false)
+const pinLoading = ref(false)
+const pinError = ref('')
+const pinSuccess = ref('')
 
 async function loadBiometricStatus() {
   try {
@@ -45,6 +51,31 @@ async function removeBiometric(credentialId) {
     await loadBiometricStatus()
   } catch (e) {
     bioError.value = e.response?.data?.error || 'Error al eliminar'
+  }
+}
+
+async function handleSetPin() {
+  pinError.value = ''
+  pinSuccess.value = ''
+  if (!pin.value || pin.value.length < 4 || pin.value.length > 8 || !/^\d+$/.test(pin.value)) {
+    pinError.value = 'El PIN debe ser numérico de 4 a 8 dígitos'
+    return
+  }
+  if (pin.value !== pinConfirm.value) {
+    pinError.value = 'Los PIN no coinciden'
+    return
+  }
+  pinLoading.value = true
+  try {
+    await auth.setPin(pin.value)
+    pinSuccess.value = 'PIN configurado correctamente'
+    pinEnabled.value = true
+    pin.value = ''
+    pinConfirm.value = ''
+  } catch (e) {
+    pinError.value = e.response?.data?.error || 'Error al configurar PIN'
+  } finally {
+    pinLoading.value = false
   }
 }
 
@@ -101,36 +132,58 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div v-if="biometricAvailable" class="biometric-card">
-      <h3>🔐 Autenticación biométrica</h3>
-      <p class="bio-desc">Huella dactilar, Face ID o Windows Hello para iniciar sesión sin contraseña.</p>
+    <!-- PIN -->
+    <div class="card-section">
+      <h3>Acceso con PIN</h3>
+      <p class="card-desc">Configura un PIN numérico para iniciar sesión rápido sin contraseña.</p>
+      <div v-if="pinSuccess" class="success-msg">{{ pinSuccess }}</div>
+      <div class="pin-form">
+        <div class="field">
+          <label>Nuevo PIN (4-8 dígitos)</label>
+          <input v-model="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="••••" />
+        </div>
+        <div class="field">
+          <label>Confirmar PIN</label>
+          <input v-model="pinConfirm" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="••••" />
+        </div>
+        <p v-if="pinError" class="error-msg">{{ pinError }}</p>
+        <button type="button" class="btn-action" :disabled="pinLoading" @click="handleSetPin">
+          {{ pinLoading ? 'Guardando...' : (pinEnabled ? 'Actualizar PIN' : 'Configurar PIN') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- Biometría -->
+    <div v-if="biometricAvailable" class="card-section">
+      <h3>Autenticación biométrica</h3>
+      <p class="card-desc">Huella dactilar, Face ID o Windows Hello para iniciar sesión sin contraseña.</p>
       <template v-if="biometricStatus.enabled">
-        <p class="bio-on">Biometría activa en {{ biometricStatus.devices.length }} dispositivo(s)</p>
+        <p class="status-on">Biometría activa en {{ biometricStatus.devices.length }} dispositivo(s)</p>
         <ul class="device-list">
           <li v-for="d in biometricStatus.devices" :key="d.id">
             <span>{{ d.device_name }} — {{ new Date(d.created_at).toLocaleDateString() }}</span>
             <button type="button" class="btn-remove" @click="removeBiometric(d.id)">Eliminar</button>
           </li>
         </ul>
-        <button type="button" class="btn-bio" :disabled="bioLoading" @click="enableBiometric">
+        <button type="button" class="btn-action" :disabled="bioLoading" @click="enableBiometric">
           Añadir otro dispositivo
         </button>
       </template>
       <template v-else>
-        <button type="button" class="btn-bio" :disabled="bioLoading" @click="enableBiometric">
+        <button type="button" class="btn-action" :disabled="bioLoading" @click="enableBiometric">
           {{ bioLoading ? 'Configurando...' : 'Activar huella / Face ID' }}
         </button>
       </template>
-      <p v-if="bioError" class="bio-err">{{ bioError }}</p>
-      <p v-if="bioSuccess" class="bio-ok">{{ bioSuccess }}</p>
+      <p v-if="bioError" class="error-msg">{{ bioError }}</p>
+      <p v-if="bioSuccess" class="success-msg">{{ bioSuccess }}</p>
     </div>
 
-    <div class="quick-actions">
+    <div class="card-section">
       <h3>Acciones Rápidas</h3>
       <div class="actions-grid">
-        <router-link to="/packages" class="action-card">🔍 Explorar Paquetes</router-link>
-        <router-link to="/reservations" class="action-card">📋 Mis Reservas</router-link>
-        <router-link to="/favorites" class="action-card">❤️ Favoritos</router-link>
+        <router-link to="/packages" class="action-card">Explorar Paquetes</router-link>
+        <router-link to="/reservations" class="action-card">Mis Reservas</router-link>
+        <router-link to="/favorites" class="action-card">Favoritos</router-link>
       </div>
     </div>
   </div>
@@ -159,49 +212,45 @@ onMounted(async () => {
 }
 .stat-value { display: block; font-size: 2rem; font-weight: 700; color: #1a1a2e; }
 .stat-label { display: block; font-size: 0.85rem; color: #888; margin-top: 0.3rem; }
-.quick-actions h3 { color: #1a1a2e; margin: 0 0 1rem; }
-.actions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
-.action-card {
-  background: #fff;
-  padding: 1.5rem;
-  border-radius: 12px;
-  text-decoration: none;
-  color: #1a1a2e;
-  font-weight: 500;
-  text-align: center;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  transition: transform 0.2s;
-}
-.action-card:hover { transform: translateY(-2px); }
-.biometric-card {
+.card-section {
   background: #fff;
   border-radius: 12px;
   padding: 1.5rem;
   margin-bottom: 2rem;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
 }
-.biometric-card h3 { margin: 0 0 0.5rem; color: #1a1a2e; }
-.bio-desc { color: #666; font-size: 0.9rem; margin: 0 0 1rem; }
-.bio-on { color: #2e7d32; font-weight: 500; margin: 0 0 0.75rem; }
+.card-section h3 { margin: 0 0 0.5rem; color: #1a1a2e; }
+.card-desc { color: #666; font-size: 0.9rem; margin: 0 0 1rem; }
+.pin-form { max-width: 320px; }
+.field { margin-bottom: 0.75rem; }
+.field label { display: block; margin-bottom: 0.3rem; font-weight: 500; color: #333; font-size: 0.85rem; }
+.field input {
+  width: 100%; padding: 0.6rem; border: 1px solid #ddd; border-radius: 8px;
+  font-size: 1rem; outline: none; box-sizing: border-box;
+}
+.field input:focus { border-color: #4fc3f7; }
+.btn-action {
+  padding: 0.65rem 1.25rem; background: #1a1a2e; color: #fff;
+  border: none; border-radius: 8px; font-weight: 600; cursor: pointer;
+}
+.btn-action:disabled { opacity: 0.6; }
+.btn-remove {
+  background: none; border: 1px solid #ef5350; color: #ef5350;
+  padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+}
+.status-on { color: #2e7d32; font-weight: 500; margin: 0 0 0.75rem; }
 .device-list { list-style: none; padding: 0; margin: 0 0 1rem; }
 .device-list li {
   display: flex; justify-content: space-between; align-items: center;
   padding: 0.5rem 0; border-bottom: 1px solid #eee; font-size: 0.9rem;
 }
-.btn-remove {
-  background: none; border: 1px solid #ef5350; color: #ef5350;
-  padding: 0.25rem 0.5rem; border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+.error-msg { color: #ef5350; font-size: 0.9rem; margin: 0.5rem 0; }
+.success-msg { color: #2e7d32; font-size: 0.9rem; margin: 0.5rem 0; }
+.actions-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 1rem; }
+.action-card {
+  background: #f8f8f8; padding: 1.5rem; border-radius: 12px; text-decoration: none;
+  color: #1a1a2e; font-weight: 500; text-align: center;
+  transition: transform 0.2s; border: 1px solid #eee;
 }
-.btn-bio {
-  padding: 0.65rem 1.25rem;
-  background: #1a1a2e;
-  color: #fff;
-  border: none;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.btn-bio:disabled { opacity: 0.6; }
-.bio-err { color: #ef5350; font-size: 0.9rem; margin: 0.5rem 0 0; }
-.bio-ok { color: #2e7d32; font-size: 0.9rem; margin: 0.5rem 0 0; }
+.action-card:hover { transform: translateY(-2px); background: #f0f0f0; }
 </style>

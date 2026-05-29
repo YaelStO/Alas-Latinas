@@ -4,6 +4,8 @@ const express = require('express');
 const cors = require('cors');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { execSync } = require('child_process');
 const jwt = require('jsonwebtoken');
 const { Keypair } = require('@stellar/stellar-sdk');
@@ -74,6 +76,91 @@ const CONTRACT_ID = process.env.CONTRACT_ID || 'CCK5C6NBWBPMATNCGL5O6DI6QRELKK5K
 const NETWORK = process.env.STELLAR_NETWORK || 'testnet';
 
 const pool = require('./lib/storage');
+
+const DEMO_PACKAGES = [
+    {
+        destination: 'Cancún', description: 'Playa, arrecife y cultura maya. Paquete todo incluido.',
+        start_date: '2026-07-01', end_date: '2026-07-07', capacity: 40, price: 1250,
+        deposit_percent: 20, image_url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800',
+    },
+    {
+        destination: 'Ciudad de México', description: 'Historia, gastronomía y museos en la capital.',
+        start_date: '2026-08-15', end_date: '2026-08-20', capacity: 30, price: 890,
+        deposit_percent: 15, image_url: 'https://images.unsplash.com/photo-1518654090668-93fc06ada88e?w=800',
+    },
+    {
+        destination: 'Cartagena', description: 'Ciudad amurallada, Caribe y arquitectura colonial.',
+        start_date: '2026-09-10', end_date: '2026-09-17', capacity: 25, price: 1100,
+        deposit_percent: 25, image_url: 'https://images.unsplash.com/photo-1580654712600-7f5f7d0b8f0e?w=800',
+    },
+    {
+        destination: 'Patagonia', description: 'Glaciares, trekking y naturaleza en el sur.',
+        start_date: '2026-11-01', end_date: '2026-11-10', capacity: 15, price: 2400,
+        deposit_percent: 30, image_url: 'https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800',
+    },
+    {
+        destination: 'Machu Picchu', description: 'La ciudad perdida de los Incas en los Andes peruanos.',
+        start_date: '2026-10-05', end_date: '2026-10-12', capacity: 20, price: 1800,
+        deposit_percent: 20, image_url: 'https://images.unsplash.com/photo-1587595431973-160d0d94add1?w=800',
+    },
+    {
+        destination: 'Torres del Paine', description: 'Trekking y naturaleza en el parque nacional chileno.',
+        start_date: '2026-12-01', end_date: '2026-12-08', capacity: 12, price: 2100,
+        deposit_percent: 30, image_url: 'https://images.unsplash.com/photo-1580651315530-69c8e0026377?w=800',
+    },
+];
+
+async function initDatabase() {
+    try {
+        await pool.query('SELECT 1 FROM users LIMIT 1');
+    } catch {
+        console.log('BD vacía — ejecutando schema.sql...');
+        const schemaPath = path.join(__dirname, 'schema.sql');
+        if (fs.existsSync(schemaPath)) {
+            let sql = fs.readFileSync(schemaPath, 'utf8');
+            sql = sql.replace(/CREATE DATABASE .*?;/gi, '').replace(/USE .*?;/gi, '');
+            const statements = sql.split(';').filter(s => s.trim().length > 0);
+            for (const stmt of statements) {
+                try { await pool.query(stmt); } catch { }
+            }
+        }
+
+        const bioSchemaPath = path.join(__dirname, 'db', 'biometric-schema.sql');
+        if (fs.existsSync(bioSchemaPath)) {
+            const bioSql = fs.readFileSync(bioSchemaPath, 'utf8');
+            try { await pool.query(bioSql); } catch { }
+        }
+
+        try {
+            await pool.query('ALTER TABLE users ADD COLUMN pin_hash VARCHAR(255) DEFAULT NULL, ADD COLUMN pin_enabled BOOLEAN DEFAULT FALSE');
+        } catch { }
+
+        console.log('Schema aplicado.');
+    }
+
+    const [adminRows] = await pool.query('SELECT id FROM users WHERE email = ?', ['admin@admin.com']);
+    if (adminRows.length === 0) {
+        const hash = await bcrypt.hash('123456', 10);
+        await pool.query(
+            'INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)',
+            [crypto.randomUUID(), 'Admin Turismo', 'admin@admin.com', hash]
+        );
+        console.log('Admin creado: admin@admin.com / 123456');
+    }
+
+    const [pkgCount] = await pool.query('SELECT COUNT(*) AS n FROM travel_packages');
+    if (pkgCount[0].n === 0) {
+        for (const pkg of DEMO_PACKAGES) {
+            await pool.query(
+                `INSERT INTO travel_packages (id, destination, description, start_date, end_date, capacity, available_slots, price, deposit_percent, image_url, is_active)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)`,
+                [crypto.randomUUID(), pkg.destination, pkg.description, pkg.start_date, pkg.end_date,
+                 pkg.capacity, pkg.capacity, pkg.price, pkg.deposit_percent, pkg.image_url]
+            );
+        }
+        console.log(`${DEMO_PACKAGES.length} paquetes de demo insertados.`);
+    }
+}
 
 function invokeContract(functionName, args) {
     try {
@@ -280,6 +367,113 @@ app.post('/api/auth/google', async (req, res) => {
     } catch (error) {
         console.error('Google auth error:', error);
         res.status(401).json({ error: error.message || 'Google authentication failed' });
+    }
+});
+
+// =============================================
+// PIN AUTH ENDPOINTS
+// =============================================
+app.post('/api/auth/pin/set', authenticateToken, async (req, res) => {
+    try {
+        const { pin } = req.body;
+        if (!pin || pin.length < 4 || pin.length > 8 || !/^\d+$/.test(pin)) {
+            return res.status(400).json({ error: 'PIN debe ser numérico de 4 a 8 dígitos' });
+        }
+        const pin_hash = await bcrypt.hash(pin, 10);
+        await pool.query('UPDATE users SET pin_hash = ?, pin_enabled = TRUE WHERE id = ?', [pin_hash, req.user.id]);
+        res.json({ message: 'PIN configurado correctamente' });
+    } catch (error) {
+        console.error('Set PIN error:', error);
+        res.status(500).json({ error: 'Error al configurar PIN' });
+    }
+});
+
+app.post('/api/auth/pin/login', async (req, res) => {
+    try {
+        const { email, pin } = req.body;
+        if (!email || !pin) {
+            return res.status(400).json({ error: 'Email y PIN requeridos' });
+        }
+        const [rows] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+        if (rows.length === 0) {
+            return res.status(401).json({ error: 'Credenciales inválidas' });
+        }
+        const user = rows[0];
+        if (!user.pin_hash) {
+            return res.status(400).json({ error: 'Este usuario no tiene PIN configurado. Inicia sesión con contraseña y configúralo en el Dashboard.' });
+        }
+        const valid = await bcrypt.compare(pin, user.pin_hash);
+        if (!valid) {
+            return res.status(401).json({ error: 'PIN incorrecto' });
+        }
+        const token = signToken(user);
+        res.json({
+            user: { id: user.id, name: user.name, email: user.email, stellar_address: user.stellar_address, loyalty_points: user.loyalty_points },
+            token, method: 'pin'
+        });
+    } catch (error) {
+        console.error('PIN login error:', error);
+        res.status(500).json({ error: 'Error al iniciar sesión con PIN' });
+    }
+});
+
+// =============================================
+// QR AUTH ENDPOINTS
+// =============================================
+const qrSessions = new Map();
+
+app.post('/api/auth/qr/generate', authenticateToken, async (req, res) => {
+    try {
+        const sessionId = crypto.randomUUID();
+        qrSessions.set(sessionId, {
+            userId: req.user.id,
+            status: 'pending',
+            createdAt: Date.now(),
+        });
+        setTimeout(() => qrSessions.delete(sessionId), 5 * 60 * 1000);
+        res.json({ sessionId, expiresIn: 300 });
+    } catch (error) {
+        console.error('QR generate error:', error);
+        res.status(500).json({ error: 'Error al generar QR' });
+    }
+});
+
+app.get('/api/auth/qr/status/:sessionId', async (req, res) => {
+    try {
+        const session = qrSessions.get(req.params.sessionId);
+        if (!session) {
+            return res.status(404).json({ error: 'Sesión QR expirada o inválida' });
+        }
+        if (session.status === 'approved') {
+            qrSessions.delete(req.params.sessionId);
+            return res.json({ status: 'approved', token: session.token, user: session.user });
+        }
+        res.json({ status: session.status });
+    } catch (error) {
+        console.error('QR status error:', error);
+        res.status(500).json({ error: 'Error al verificar QR' });
+    }
+});
+
+app.post('/api/auth/qr/approve', authenticateToken, async (req, res) => {
+    try {
+        const { sessionId } = req.body;
+        const session = qrSessions.get(sessionId);
+        if (!session) {
+            return res.status(404).json({ error: 'Sesión QR expirada' });
+        }
+        if (session.userId !== req.user.id) {
+            return res.status(403).json({ error: 'No autorizado' });
+        }
+        const user = await getUserById(req.user.id);
+        const token = signToken(user);
+        session.status = 'approved';
+        session.token = token;
+        session.user = { id: user.id, name: user.name, email: user.email, stellar_address: user.stellar_address, loyalty_points: user.loyalty_points };
+        res.json({ message: 'QR aprobado' });
+    } catch (error) {
+        console.error('QR approve error:', error);
+        res.status(500).json({ error: 'Error al aprobar QR' });
     }
 });
 
@@ -940,6 +1134,7 @@ async function startServer() {
     try {
         await pool.query('SELECT 1');
         console.log(`Almacenamiento: ${pool.storageLabel || pool.mode}`);
+        await initDatabase();
         if (pool.mode === 'web3') {
             console.log(`Contrato Soroban (testnet): ${CONTRACT_ID}`);
         }
@@ -962,6 +1157,11 @@ async function startServer() {
     console.log('  POST   /api/auth/biometric/login-options');
     console.log('  POST   /api/auth/biometric/login-verify');
     console.log('  GET    /api/auth/biometric/status');
+    console.log('  POST   /api/auth/pin/set');
+    console.log('  POST   /api/auth/pin/login');
+    console.log('  POST   /api/auth/qr/generate');
+    console.log('  GET    /api/auth/qr/status/:sessionId');
+    console.log('  POST   /api/auth/qr/approve');
     console.log('  GET    /api/packages');
     console.log('  GET    /api/packages/:id');
     console.log('  POST   /api/packages');

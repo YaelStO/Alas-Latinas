@@ -46,6 +46,16 @@ export const useAuthStore = defineStore('auth', () => {
     return registerBio(api, deviceName)
   }
 
+  async function pinLogin(data) {
+    const res = await api.auth.pinLogin(data)
+    setSession(res.data.user, res.data.token)
+    return res.data
+  }
+
+  async function setPin(pin) {
+    return api.auth.pinSet({ pin })
+  }
+
   function logout() {
     user.value = null
     token.value = ''
@@ -63,6 +73,8 @@ export const useAuthStore = defineStore('auth', () => {
     googleLogin,
     biometricLogin,
     registerBiometric,
+    pinLogin,
+    setPin,
     logout,
   }
 })

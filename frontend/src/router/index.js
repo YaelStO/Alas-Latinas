@@ -7,6 +7,7 @@ import PackageDetail from '../views/PackageDetail.vue'
 import MyReservations from '../views/MyReservations.vue'
 import Favorites from '../views/Favorites.vue'
 import Dashboard from '../views/Dashboard.vue'
+import QrAuth from '../views/QrAuth.vue'
 import AdminDashboard from '../views/admin/AdminDashboard.vue'
 import AdminPackages from '../views/admin/AdminPackages.vue'
 import AdminReservations from '../views/admin/AdminReservations.vue'
@@ -21,6 +22,7 @@ const routes = [
   { path: '/reservations', name: 'MyReservations', component: MyReservations, meta: { requiresAuth: true } },
   { path: '/favorites', name: 'Favorites', component: Favorites, meta: { requiresAuth: true } },
   { path: '/dashboard', name: 'Dashboard', component: Dashboard, meta: { requiresAuth: true } },
+  { path: '/qr-auth', name: 'QrAuth', component: QrAuth, meta: { requiresAuth: true } },
   { path: '/admin', name: 'AdminDashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/admin/packages', name: 'AdminPackages', component: AdminPackages, meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/admin/reservations', name: 'AdminReservations', component: AdminReservations, meta: { requiresAuth: true, requiresAdmin: true } },

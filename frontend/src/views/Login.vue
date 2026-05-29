@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 import { canUsePlatformBiometric } from '../services/biometric'
@@ -9,6 +9,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const email = ref('')
 const password = ref('')
+const pin = ref('')
 const error = ref('')
 const googleLoading = ref(false)
 const biometricLoading = ref(false)
@@ -16,6 +17,12 @@ const biometricAvailable = ref(false)
 const hasBiometric = ref(false)
 const userRegistered = ref(false)
 const checkingBio = ref(false)
+const loginMode = ref('password')
+const pinLoading = ref(false)
+const qrSessionId = ref('')
+const qrStatus = ref('')
+const qrPollTimer = ref(null)
+const qrLoading = ref(false)
 
 async function handleLogin() {
   error.value = ''
@@ -24,6 +31,23 @@ async function handleLogin() {
     router.push('/')
   } catch (e) {
     error.value = e.response?.data?.error || 'Error al iniciar sesión'
+  }
+}
+
+async function handlePinLogin() {
+  error.value = ''
+  if (!pin.value || pin.value.length < 4) {
+    error.value = 'Ingresa tu PIN de 4 a 8 dígitos'
+    return
+  }
+  pinLoading.value = true
+  try {
+    await auth.pinLogin({ email: email.value, pin: pin.value })
+    router.push('/')
+  } catch (e) {
+    error.value = e.response?.data?.error || 'PIN incorrecto'
+  } finally {
+    pinLoading.value = false
   }
 }
 
@@ -79,6 +103,9 @@ async function handleGoogleCredential(response) {
     router.push('/')
   } catch (e) {
     error.value = e.response?.data?.error || 'Error al iniciar sesión con Google'
+    if (error.value.includes('audience') || error.value.includes('origin')) {
+      error.value = 'Error de configuración de Google OAuth. Asegúrate de que la URL del frontend esté registrada en Google Cloud Console como "JavaScript origin".'
+    }
   } finally {
     googleLoading.value = false
   }
@@ -97,6 +124,38 @@ function renderGoogleButton() {
     })
   }
 }
+
+async function handleQrLogin() {
+  error.value = ''
+  qrLoading.value = true
+  try {
+    const res = await api.auth.qrGenerate()
+    qrSessionId.value = res.data.sessionId
+    qrStatus.value = 'pending'
+    const qrUrl = `${window.location.origin}/qr-auth?session=${res.data.sessionId}`
+    qrPollTimer.value = setInterval(async () => {
+      try {
+        const statusRes = await api.auth.qrStatus(res.data.sessionId)
+        if (statusRes.data.status === 'approved') {
+          clearInterval(qrPollTimer.value)
+          auth.setSession(statusRes.data.user, statusRes.data.token)
+          router.push('/')
+        }
+      } catch {
+        clearInterval(qrPollTimer.value)
+        qrStatus.value = 'expired'
+      }
+    }, 2000)
+  } catch (e) {
+    error.value = 'Error al generar QR. Debes iniciar sesión primero.'
+  } finally {
+    qrLoading.value = false
+  }
+}
+
+onUnmounted(() => {
+  if (qrPollTimer.value) clearInterval(qrPollTimer.value)
+})
 
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
 const hasGoogleConfig = googleClientId && googleClientId !== 'your-google-client-id.apps.googleusercontent.com'
@@ -133,8 +192,16 @@ onMounted(async () => {
         <input v-model="email" type="email" placeholder="tu@email.com" required />
       </div>
 
+      <!-- Selector de método -->
+      <div class="method-tabs">
+        <button :class="{ active: loginMode === 'password' }" @click="loginMode = 'password'">Contraseña</button>
+        <button :class="{ active: loginMode === 'pin' }" @click="loginMode = 'pin'" :disabled="!userRegistered">PIN</button>
+        <button :class="{ active: loginMode === 'biometric' }" @click="loginMode = 'biometric'" :disabled="!biometricAvailable">Huella</button>
+        <button :class="{ active: loginMode === 'qr' }" @click="loginMode = 'qr'">QR</button>
+      </div>
+
       <!-- Biometría -->
-      <div class="biometric-section">
+      <div v-if="loginMode === 'biometric'" class="biometric-section">
         <template v-if="!biometricAvailable">
           <p class="bio-warn">
             Tu navegador o dispositivo no tiene huella/Face ID disponible.
@@ -150,30 +217,71 @@ onMounted(async () => {
           >
             <span v-if="biometricLoading">Verificando...</span>
             <span v-else-if="checkingBio">Comprobando...</span>
-            <span v-else>🔐 Entrar con huella / Face ID</span>
+            <span v-else>Entrar con huella / Face ID</span>
           </button>
           <p v-if="email && !checkingBio && !userRegistered" class="bio-hint">
             Este email no está registrado. <router-link to="/register">Crea una cuenta</router-link> primero.
           </p>
           <p v-else-if="email && !checkingBio && userRegistered && !hasBiometric" class="bio-hint">
-            Biometría no activada. Inicia sesión con contraseña → Dashboard → <strong>Activar huella / Face ID</strong>.
+            Biometría no activada. Inicia sesión con contraseña y actívala en el Dashboard.
           </p>
           <p v-else-if="email && hasBiometric" class="bio-ok">
-            ✓ Biometría disponible para este email
+            Biometría disponible para este email
           </p>
         </template>
       </div>
 
-      <div class="divider"><span>contraseña</span></div>
-
-      <form @submit.prevent="handleLogin">
+      <!-- PIN -->
+      <div v-if="loginMode === 'pin'" class="pin-section">
         <div class="field">
-          <label>Contraseña</label>
-          <input v-model="password" type="password" placeholder="••••••" required />
+          <label>PIN numérico</label>
+          <input v-model="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="••••" @keyup.enter="handlePinLogin" />
         </div>
-        <p v-if="error" class="error">{{ error }}</p>
-        <button type="submit" class="btn-primary">Entrar</button>
-      </form>
+        <p v-if="!userRegistered && email" class="bio-hint">
+          Este email no está registrado. <router-link to="/register">Crea una cuenta</router-link> primero.
+        </p>
+        <button type="button" class="btn-primary" :disabled="pinLoading || !email || !pin" @click="handlePinLogin">
+          {{ pinLoading ? 'Verificando...' : 'Entrar con PIN' }}
+        </button>
+      </div>
+
+      <!-- QR -->
+      <div v-if="loginMode === 'qr'" class="qr-section">
+        <p v-if="!auth.isAuthenticated" class="bio-hint">Inicia sesión con otro método primero, luego genera tu QR para vincular tu móvil.</p>
+        <button v-if="auth.isAuthenticated && !qrSessionId" type="button" class="btn-primary" :disabled="qrLoading" @click="handleQrLogin">
+          {{ qrLoading ? 'Generando...' : 'Generar Código QR' }}
+        </button>
+        <div v-if="qrSessionId" class="qr-display">
+          <div class="qr-box">
+            <div class="qr-code">
+              <div class="qr-pattern">
+                <div class="qr-corner tl"></div>
+                <div class="qr-corner tr"></div>
+                <div class="qr-corner bl"></div>
+                <div class="qr-center-dot"></div>
+              </div>
+            </div>
+          </div>
+          <p class="qr-hint">Escanea con tu móvil o abre este enlace:</p>
+          <p class="qr-url">{{ `${window.location.origin}/qr-auth?session=${qrSessionId}` }}</p>
+          <p class="qr-status" v-if="qrStatus === 'pending'">Esperando confirmación...</p>
+        </div>
+      </div>
+
+      <!-- Contraseña -->
+      <div v-if="loginMode === 'password'">
+        <div class="divider"><span>contraseña</span></div>
+        <form @submit.prevent="handleLogin">
+          <div class="field">
+            <label>Contraseña</label>
+            <input v-model="password" type="password" placeholder="••••••" required />
+          </div>
+          <p v-if="error" class="error">{{ error }}</p>
+          <button type="submit" class="btn-primary">Entrar</button>
+        </form>
+      </div>
+
+      <p v-if="error && loginMode !== 'password'" class="error">{{ error }}</p>
       <p class="auth-footer">¿No tienes cuenta? <router-link to="/register">Regístrate</router-link></p>
     </div>
   </div>
@@ -212,7 +320,17 @@ onMounted(async () => {
   color: #bbb; font-size: 0.85rem;
 }
 .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e0e0e0; }
-.biometric-section { margin: 0.5rem 0 1rem; }
+.method-tabs {
+  display: flex; gap: 0.5rem; margin-bottom: 1rem;
+}
+.method-tabs button {
+  flex: 1; padding: 0.5rem; border: 1px solid #ddd; border-radius: 8px;
+  background: #fff; color: #555; font-size: 0.8rem; font-weight: 500;
+  cursor: pointer; transition: all 0.2s;
+}
+.method-tabs button.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
+.method-tabs button:disabled { opacity: 0.4; cursor: not-allowed; }
+.biometric-section, .pin-section, .qr-section { margin: 0.5rem 0 1rem; }
 .btn-biometric {
   width: 100%;
   padding: 0.75rem;
@@ -257,6 +375,34 @@ onMounted(async () => {
   transition: background 0.2s;
 }
 .btn-primary:hover { background: #29b6f6; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 .auth-footer { text-align: center; margin-top: 1rem; color: #888; font-size: 0.9rem; }
 .auth-footer a { color: #4fc3f7; text-decoration: none; font-weight: 500; }
+.qr-box {
+  display: flex; justify-content: center; margin: 1rem 0;
+}
+.qr-code {
+  width: 200px; height: 200px; background: #fff; border: 3px solid #1a1a2e;
+  border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  position: relative;
+}
+.qr-pattern {
+  width: 160px; height: 160px; position: relative;
+  background: repeating-linear-gradient(0deg, #1a1a2e 0px, #1a1a2e 4px, #fff 4px, #fff 8px),
+              repeating-linear-gradient(90deg, #1a1a2e 0px, #1a1a2e 4px, #fff 4px, #fff 8px);
+  opacity: 0.3;
+}
+.qr-corner {
+  position: absolute; width: 40px; height: 40px; border: 4px solid #1a1a2e;
+}
+.qr-corner.tl { top: -10px; left: -10px; border-right: none; border-bottom: none; }
+.qr-corner.tr { top: -10px; right: -10px; border-left: none; border-bottom: none; }
+.qr-corner.bl { bottom: -10px; left: -10px; border-right: none; border-top: none; }
+.qr-center-dot {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  width: 24px; height: 24px; background: #1a1a2e; border-radius: 50%;
+}
+.qr-hint { font-size: 0.85rem; color: #666; text-align: center; margin: 0.5rem 0; }
+.qr-url { font-size: 0.75rem; color: #4fc3f7; text-align: center; word-break: break-all; margin: 0; }
+.qr-status { font-size: 0.85rem; color: #0f3460; text-align: center; margin: 0.5rem 0; }
 </style>
