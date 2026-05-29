@@ -40,7 +40,7 @@ function clearFilters() {
     </div>
 
     <div v-if="store.loading" class="loading">Cargando paquetes...</div>
-    <div v-else-if="store.packages.length === 0" class="empty">No se encontraron paquetes.</div>
+    <div v-else-if="store.packages?.length === 0" class="empty">No se encontraron paquetes.</div>
     <div v-else class="packages-grid">
       <PackageCard v-for="pkg in store.packages" :key="pkg.id" :pkg="pkg" />
     </div>

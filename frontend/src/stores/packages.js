@@ -11,7 +11,7 @@ export const usePackagesStore = defineStore('packages', () => {
     loading.value = true
     try {
       const res = await api.packages.list(params)
-      packages.value = res.data.packages
+      packages.value = res.data.packages || []
     } finally {
       loading.value = false
     }

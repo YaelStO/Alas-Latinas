@@ -88,7 +88,7 @@ onMounted(async () => {
       api.reservations.list(),
     ])
     loyaltyPoints.value = loyaltyRes.data.loyalty_points
-    const reservations = reservationsRes.data.reservations
+    const reservations = reservationsRes.data.reservations || []
     stats.value.total = reservations.length
     stats.value.confirmed = reservations.filter((r) => r.status === 'confirmed').length
     stats.value.completed = reservations.filter((r) => r.status === 'completed').length

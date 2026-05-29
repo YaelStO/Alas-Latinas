@@ -27,7 +27,7 @@ function handleSearch() {
     <section class="section">
       <h2>Paquetes Destacados</h2>
       <div v-if="store.loading" class="loading">Cargando...</div>
-      <div v-else-if="store.packages.length === 0" class="empty">No hay paquetes disponibles aún.</div>
+      <div v-else-if="store.packages?.length === 0" class="empty">No hay paquetes disponibles aún.</div>
       <div v-else class="packages-grid">
         <PackageCard v-for="pkg in store.packages" :key="pkg.id" :pkg="pkg" />
       </div>

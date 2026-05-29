@@ -11,10 +11,10 @@ onMounted(async () => {
       api.admin.getReservations(),
       api.admin.getUsers(),
     ])
-    stats.value.packages = pkgRes.data.packages.length
-    stats.value.reservations = resRes.data.reservations.length
-    stats.value.users = userRes.data.users.length
-    stats.value.pending = resRes.data.reservations.filter(r => r.status === 'pending').length
+    stats.value.packages = (pkgRes.data.packages || []).length
+    stats.value.reservations = (resRes.data.reservations || []).length
+    stats.value.users = (userRes.data.users || []).length
+    stats.value.pending = (resRes.data.reservations || []).filter(r => r.status === 'pending').length
   } catch {}
 })
 </script>
