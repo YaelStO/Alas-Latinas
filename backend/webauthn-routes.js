@@ -9,12 +9,15 @@ const RP_NAME = 'Alas Latinas Turismo';
 const CHALLENGE_TTL_MS = 5 * 60 * 1000;
 const challenges = new Map();
 
-function getRpConfig() {
-    return {
-        rpName: RP_NAME,
-        rpID: process.env.WEBAUTHN_RP_ID || 'localhost',
-        origin: process.env.WEBAUTHN_ORIGIN || 'http://localhost:5173',
-    };
+function getRpConfig(req) {
+    const origin = req?.headers?.origin || process.env.WEBAUTHN_ORIGIN || 'http://localhost:5173';
+    let rpID;
+    try {
+        rpID = new URL(origin).hostname;
+    } catch {
+        rpID = process.env.WEBAUTHN_RP_ID || 'localhost';
+    }
+    return { rpName: RP_NAME, rpID, origin };
 }
 
 function storeChallenge(key, challenge) {
@@ -88,7 +91,7 @@ function registerWebAuthnRoutes(app, deps) {
             }
 
             const existing = await getCredentialsByUserId(pool, user.id);
-            const { rpID } = getRpConfig();
+            const { rpID } = getRpConfig(req);
 
             const options = await generateRegistrationOptions({
                 rpName: RP_NAME,
@@ -125,7 +128,7 @@ function registerWebAuthnRoutes(app, deps) {
                 return res.status(400).json({ error: 'Desafío expirado. Intenta de nuevo.' });
             }
 
-            const { rpID, origin } = getRpConfig();
+            const { rpID, origin } = getRpConfig(req);
             const verification = await verifyRegistrationResponse({
                 response: credentialResponse,
                 expectedChallenge,
@@ -194,7 +197,7 @@ function registerWebAuthnRoutes(app, deps) {
                 });
             }
 
-            const { rpID } = getRpConfig();
+            const { rpID } = getRpConfig(req);
             const options = await generateAuthenticationOptions({
                 rpID,
                 allowCredentials: credentials.map((c) => ({
@@ -231,7 +234,7 @@ function registerWebAuthnRoutes(app, deps) {
                 return res.status(401).json({ error: 'Credencial biométrica no reconocida' });
             }
 
-            const { rpID, origin } = getRpConfig();
+            const { rpID, origin } = getRpConfig(req);
             const verification = await verifyAuthenticationResponse({
                 response: authenticationResponse,
                 expectedChallenge,

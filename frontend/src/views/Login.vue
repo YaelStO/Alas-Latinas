@@ -194,54 +194,32 @@ onMounted(async () => {
       <!-- Selector de método -->
       <div class="method-tabs">
         <button :class="{ active: loginMode === 'password' }" @click="loginMode = 'password'">Contraseña</button>
-        <button :class="{ active: loginMode === 'pin' }" @click="loginMode = 'pin'" :disabled="!userRegistered">PIN</button>
-        <button :class="{ active: loginMode === 'biometric' }" @click="loginMode = 'biometric'" :disabled="!biometricAvailable">Huella</button>
+        <button :class="{ active: loginMode === 'webauthn' }" @click="loginMode = 'webauthn'" :disabled="!userRegistered">WebAuthn</button>
         <button :class="{ active: loginMode === 'qr' }" @click="loginMode = 'qr'">QR</button>
       </div>
 
-      <!-- Biometría -->
-      <div v-if="loginMode === 'biometric'" class="biometric-section">
-        <template v-if="!biometricAvailable">
-          <p class="bio-warn">
-            Tu navegador o dispositivo no tiene huella/Face ID disponible.
-            Usa Chrome o Edge con Windows Hello configurado, o un móvil con lector biométrico.
-          </p>
-        </template>
-        <template v-else>
-          <button
-            type="button"
-            class="btn-biometric"
-            :disabled="biometricLoading || checkingBio || !email || !hasBiometric"
-            @click="handleBiometricLogin"
-          >
-            <span v-if="biometricLoading">Verificando...</span>
-            <span v-else-if="checkingBio">Comprobando...</span>
-            <span v-else>Entrar con huella / Face ID</span>
-          </button>
-          <p v-if="email && !checkingBio && !userRegistered" class="bio-hint">
-            Este email no está registrado. <router-link to="/register">Crea una cuenta</router-link> primero.
-          </p>
-          <p v-else-if="email && !checkingBio && userRegistered && !hasBiometric" class="bio-hint">
-            Biometría no activada. Inicia sesión con contraseña y actívala en el Dashboard.
-          </p>
-          <p v-else-if="email && hasBiometric" class="bio-ok">
-            Biometría disponible para este email
-          </p>
-        </template>
-      </div>
-
-      <!-- PIN -->
-      <div v-if="loginMode === 'pin'" class="pin-section">
-        <div class="field">
-          <label>PIN numérico</label>
-          <input v-model="pin" type="password" inputmode="numeric" pattern="[0-9]*" maxlength="8" placeholder="••••" @keyup.enter="handlePinLogin" />
-        </div>
-        <p v-if="!userRegistered && email" class="bio-hint">
+      <!-- WebAuthn (huella, Face ID, PIN del dispositivo) -->
+      <div v-if="loginMode === 'webauthn'" class="biometric-section">
+        <p class="bio-desc">Usa la autenticación de tu dispositivo: huella, Face ID, PIN o Windows Hello.</p>
+        <button
+          type="button"
+          class="btn-biometric"
+          :disabled="biometricLoading || checkingBio || !email || !hasBiometric"
+          @click="handleBiometricLogin"
+        >
+          <span v-if="biometricLoading">Verificando...</span>
+          <span v-else-if="checkingBio">Comprobando...</span>
+          <span v-else>Autenticar con el dispositivo</span>
+        </button>
+        <p v-if="email && !checkingBio && !userRegistered" class="bio-hint">
           Este email no está registrado. <router-link to="/register">Crea una cuenta</router-link> primero.
         </p>
-        <button type="button" class="btn-primary" :disabled="pinLoading || !email || !pin" @click="handlePinLogin">
-          {{ pinLoading ? 'Verificando...' : 'Entrar con PIN' }}
-        </button>
+        <p v-else-if="email && !checkingBio && userRegistered && !hasBiometric" class="bio-hint">
+          WebAuthn no activado. Inicia sesión con contraseña y actívalo en el Dashboard.
+        </p>
+        <p v-else-if="email && hasBiometric" class="bio-ok">
+          WebAuthn disponible para este email
+        </p>
       </div>
 
       <!-- QR -->
@@ -346,6 +324,7 @@ onMounted(async () => {
 }
 .btn-biometric:hover:not(:disabled) { background: #0f3460; }
 .btn-biometric:disabled { opacity: 0.5; cursor: not-allowed; }
+.bio-desc { font-size: 0.85rem; color: #666; text-align: center; margin: 0 0 1rem; line-height: 1.4; }
 .bio-hint { font-size: 0.8rem; color: #888; margin: 0.5rem 0 0; text-align: center; line-height: 1.4; }
 .bio-hint a { color: #4fc3f7; }
 .bio-warn { font-size: 0.8rem; color: #e65100; background: #fff3e0; padding: 0.6rem; border-radius: 8px; margin: 0; line-height: 1.4; }
