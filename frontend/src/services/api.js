@@ -42,6 +42,7 @@ export default {
     biometricStatus: () => api.get('/auth/biometric/status'),
     biometricRemove: (credentialId) => api.delete(`/auth/biometric/${credentialId}`),
     qrGenerate: () => api.post('/auth/qr/generate'),
+    qrLoginInit: () => api.post('/auth/qr/login-init'),
     qrStatus: (sessionId) => api.get(`/auth/qr/status/${sessionId}`),
     qrApprove: (data) => api.post('/auth/qr/approve', data),
   },
@@ -69,6 +70,10 @@ export default {
     add: (data) => api.post('/favorites', data),
     list: () => api.get('/favorites'),
     remove: (packageId) => api.delete(`/favorites/${packageId}`),
+  },
+  stellar: {
+    balance: () => api.get('/stellar/balance'),
+    fund: () => api.post('/stellar/fund'),
   },
   loyalty: {
     get: () => api.get('/loyalty'),

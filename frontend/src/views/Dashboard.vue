@@ -8,6 +8,9 @@ const auth = useAuthStore()
 const loyaltyPoints = ref(0)
 const stats = ref({ total: 0, confirmed: 0, completed: 0, pending: 0 })
 const biometricStatus = ref({ enabled: false, devices: [] })
+const stellarBalance = ref(0)
+const stellarAddress = ref('')
+const platformAddress = ref('')
 const biometricAvailable = ref(false)
 const bioLoading = ref(false)
 const bioError = ref('')
@@ -87,6 +90,12 @@ onMounted(async () => {
       api.loyalty.get(),
       api.reservations.list(),
     ])
+    try {
+      const stellarRes = await api.stellar.balance()
+      stellarBalance.value = stellarRes.data.balance
+      stellarAddress.value = stellarRes.data.address
+      platformAddress.value = stellarRes.data.platform_address
+    } catch (_) {}
     loyaltyPoints.value = loyaltyRes.data.loyalty_points
     const reservations = reservationsRes.data.reservations || []
     stats.value.total = reservations.length
@@ -106,7 +115,10 @@ onMounted(async () => {
     <div class="welcome-card">
       <h2>Bienvenido, {{ auth.user?.name }}</h2>
       <p>{{ auth.user?.email }}</p>
-      <p v-if="auth.user?.stellar_address" class="stellar-addr">Stellar: {{ auth.user.stellar_address }}</p>
+      <p v-if="auth.user?.stellar_address" class="stellar-addr">
+        Stellar: {{ auth.user.stellar_address }}
+        <span v-if="stellarBalance > 0" class="xlm-balance">{{ stellarBalance }} XLM</span>
+      </p>
     </div>
 
     <div class="stats-grid">
@@ -129,6 +141,10 @@ onMounted(async () => {
       <div class="stat-card">
         <span class="stat-value">{{ stats.completed }}</span>
         <span class="stat-label">Completadas</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value">{{ stellarBalance }}</span>
+        <span class="stat-label">XLM Disponibles</span>
       </div>
     </div>
 
@@ -202,6 +218,7 @@ onMounted(async () => {
 .welcome-card h2 { margin: 0 0 0.3rem; }
 .welcome-card p { margin: 0; color: #aaa; }
 .stellar-addr { font-size: 0.85rem; color: #4fc3f7 !important; margin-top: 0.5rem !important; word-break: break-all; }
+.xlm-balance { display: block; color: #ffd700; font-weight: 600; margin-top: 0.3rem; font-size: 0.95rem; }
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
 .stat-card {
   background: #fff;

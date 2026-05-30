@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const jwt = require('jsonwebtoken');
-const { Keypair } = require('@stellar/stellar-sdk');
+const { Keypair, TransactionBuilder, Operation, Asset, BASE_FEE, Networks, Horizon } = require('@stellar/stellar-sdk');
 
 const app = express();
 const FRONTEND_URL = process.env.FRONTEND_URL || '';
@@ -148,6 +148,8 @@ async function initDatabase() {
         console.log('Admin creado: admin@admin.com / 123456');
     }
 
+    fundTestnetAccount(PLATFORM_STELLAR_ADDRESS);
+
     const [pkgCount] = await pool.query('SELECT COUNT(*) AS n FROM travel_packages');
     if (pkgCount[0].n === 0) {
         for (const pkg of DEMO_PACKAGES) {
@@ -212,6 +214,23 @@ function generateStellarKeypair(provider, identifier) {
     const hash = crypto.createHash('sha256').update(combined).digest();
     return Keypair.fromRawEd25519Seed(hash);
 }
+
+const stellarServer = new Horizon.Server('https://horizon-testnet.stellar.org');
+
+async function getStellarBalance(publicKey) {
+    try {
+        const account = await stellarServer.loadAccount(publicKey);
+        const xlmBalance = account.balances.find(b => b.asset_type === 'native');
+        return xlmBalance ? parseFloat(xlmBalance.balance) : 0;
+    } catch {
+        return 0;
+    }
+}
+
+const PLATFORM_KEYPAIR = Keypair.fromRawEd25519Seed(
+    crypto.createHash('sha256').update('alas-latinas-platform-v1').digest()
+);
+const PLATFORM_STELLAR_ADDRESS = PLATFORM_KEYPAIR.publicKey();
 
 function decodeGoogleJWT(token) {
     try {
@@ -281,6 +300,8 @@ app.post('/api/auth/register', async (req, res) => {
 
         const user = await getUserById(userId);
         const token = signToken(user);
+
+        fundTestnetAccount(stellarAddress);
 
         res.status(201).json({ user, token });
     } catch (error) {
@@ -438,6 +459,22 @@ app.post('/api/auth/qr/generate', authenticateToken, async (req, res) => {
     }
 });
 
+app.post('/api/auth/qr/login-init', async (req, res) => {
+    try {
+        const sessionId = crypto.randomUUID();
+        qrSessions.set(sessionId, {
+            userId: null,
+            status: 'pending',
+            createdAt: Date.now(),
+        });
+        setTimeout(() => qrSessions.delete(sessionId), 5 * 60 * 1000);
+        res.json({ sessionId, expiresIn: 300 });
+    } catch (error) {
+        console.error('QR login-init error:', error);
+        res.status(500).json({ error: 'Error al generar QR' });
+    }
+});
+
 app.get('/api/auth/qr/status/:sessionId', async (req, res) => {
     try {
         const session = qrSessions.get(req.params.sessionId);
@@ -462,7 +499,7 @@ app.post('/api/auth/qr/approve', authenticateToken, async (req, res) => {
         if (!session) {
             return res.status(404).json({ error: 'Sesión QR expirada' });
         }
-        if (session.userId !== req.user.id) {
+        if (session.userId && session.userId !== req.user.id) {
             return res.status(403).json({ error: 'No autorizado' });
         }
         const user = await getUserById(req.user.id);
@@ -470,10 +507,46 @@ app.post('/api/auth/qr/approve', authenticateToken, async (req, res) => {
         session.status = 'approved';
         session.token = token;
         session.user = { id: user.id, name: user.name, email: user.email, stellar_address: user.stellar_address, loyalty_points: user.loyalty_points };
-        res.json({ message: 'QR aprobado' });
+        res.json({ message: 'QR aprobado', user: user.email });
     } catch (error) {
         console.error('QR approve error:', error);
         res.status(500).json({ error: 'Error al aprobar QR' });
+    }
+});
+
+// =============================================
+// STELLAR ENDPOINTS
+// =============================================
+app.get('/api/stellar/balance', authenticateToken, async (req, res) => {
+    try {
+        const stellarAddress = await resolveStellarAddress(req.user);
+        if (!stellarAddress) {
+            return res.json({ balance: 0, address: null });
+        }
+        const balance = await getStellarBalance(stellarAddress);
+        res.json({ balance, address: stellarAddress, platform_address: PLATFORM_STELLAR_ADDRESS });
+    } catch (error) {
+        console.error('Stellar balance error:', error);
+        res.status(500).json({ error: 'Error al consultar saldo' });
+    }
+});
+
+app.post('/api/stellar/fund', authenticateToken, async (req, res) => {
+    try {
+        const stellarAddress = await resolveStellarAddress(req.user);
+        if (!stellarAddress) {
+            return res.status(400).json({ error: 'Cuenta Stellar no disponible' });
+        }
+        const balance = await getStellarBalance(stellarAddress);
+        if (balance > 0) {
+            return res.json({ message: 'La cuenta ya tiene fondos', balance, address: stellarAddress });
+        }
+        await fundTestnetAccount(stellarAddress);
+        const newBalance = await getStellarBalance(stellarAddress);
+        res.json({ message: 'Cuenta fondeada con 10,000 XLM', balance: newBalance, address: stellarAddress });
+    } catch (error) {
+        console.error('Stellar fund error:', error);
+        res.status(500).json({ error: 'Error al fondear cuenta' });
     }
 });
 
@@ -598,6 +671,30 @@ app.post('/api/reservations', authenticateToken, async (req, res) => {
 
         await pool.query('UPDATE travel_packages SET available_slots = available_slots - 1 WHERE id = ?', [package_id]);
 
+        let txHash = null;
+        try {
+            const userKeypair = generateStellarKeypair('email', req.user.email);
+            const userAccount = await stellarServer.loadAccount(stellarAddress);
+            const depositStroops = Math.floor(deposit * 1e7);
+            const tx = new TransactionBuilder(userAccount, {
+                fee: BASE_FEE,
+                networkPassphrase: Networks.TESTNET,
+            })
+                .addOperation(Operation.payment({
+                    destination: PLATFORM_STELLAR_ADDRESS,
+                    asset: Asset.native(),
+                    amount: (depositStroops / 1e7).toFixed(7),
+                }))
+                .setTimeout(30)
+                .build();
+            tx.sign(userKeypair);
+            const result = await stellarServer.submitTransaction(tx);
+            txHash = result.hash;
+            await pool.query('UPDATE reservations SET payment_transaction_hash = ? WHERE id = ?', [txHash, resId]);
+        } catch (txError) {
+            console.warn('XLM transfer warning (demo):', txError.message);
+        }
+
         try {
             const contractResId = invokeContract('create_reservation',
                 `--arg-addr ${stellarAddress} --arg-u64 ${pkg.contract_package_id || 1}`
@@ -613,7 +710,7 @@ app.post('/api/reservations', authenticateToken, async (req, res) => {
             [reservation.id, 'deposit', deposit, 'pending']
         );
 
-        res.status(201).json({ reservation });
+        res.status(201).json({ reservation, stellar_tx: txHash });
     } catch (error) {
         console.error('Create reservation error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -1160,6 +1257,7 @@ async function startServer() {
     console.log('  POST   /api/auth/pin/set');
     console.log('  POST   /api/auth/pin/login');
     console.log('  POST   /api/auth/qr/generate');
+    console.log('  POST   /api/auth/qr/login-init');
     console.log('  GET    /api/auth/qr/status/:sessionId');
     console.log('  POST   /api/auth/qr/approve');
     console.log('  GET    /api/packages');
@@ -1175,6 +1273,8 @@ async function startServer() {
     console.log('  POST   /api/favorites');
     console.log('  GET    /api/favorites');
     console.log('  DELETE /api/favorites/:package_id');
+    console.log('  GET    /api/stellar/balance');
+    console.log('  POST   /api/stellar/fund');
     console.log('  GET    /api/loyalty');
     console.log('  POST   /api/admin/confirm-service');
     console.log('  GET    /api/admin/users');

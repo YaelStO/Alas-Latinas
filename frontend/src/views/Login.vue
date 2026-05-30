@@ -129,10 +129,9 @@ async function handleQrLogin() {
   error.value = ''
   qrLoading.value = true
   try {
-    const res = await api.auth.qrGenerate()
+    const res = await api.auth.qrLoginInit()
     qrSessionId.value = res.data.sessionId
     qrStatus.value = 'pending'
-    const qrUrl = `${window.location.origin}/qr-auth?session=${res.data.sessionId}`
     qrPollTimer.value = setInterval(async () => {
       try {
         const statusRes = await api.auth.qrStatus(res.data.sessionId)
@@ -147,7 +146,7 @@ async function handleQrLogin() {
       }
     }, 2000)
   } catch (e) {
-    error.value = 'Error al generar QR. Debes iniciar sesión primero.'
+    error.value = 'Error al generar QR'
   } finally {
     qrLoading.value = false
   }
@@ -247,9 +246,9 @@ onMounted(async () => {
 
       <!-- QR -->
       <div v-if="loginMode === 'qr'" class="qr-section">
-        <p v-if="!auth.isAuthenticated" class="bio-hint">Inicia sesión con otro método primero, luego genera tu QR para vincular tu móvil.</p>
-        <button v-if="auth.isAuthenticated && !qrSessionId" type="button" class="btn-primary" :disabled="qrLoading" @click="handleQrLogin">
-          {{ qrLoading ? 'Generando...' : 'Generar Código QR' }}
+        <p class="qr-desc">Escanea el código QR con tu móvil y autentícate con huella, Face ID o PIN.</p>
+        <button v-if="!qrSessionId" type="button" class="btn-primary" :disabled="qrLoading" @click="handleQrLogin">
+          {{ qrLoading ? 'Generando...' : 'Iniciar sesión con QR' }}
         </button>
         <div v-if="qrSessionId" class="qr-display">
           <div class="qr-box">
@@ -262,9 +261,10 @@ onMounted(async () => {
               </div>
             </div>
           </div>
-          <p class="qr-hint">Escanea con tu móvil o abre este enlace:</p>
+          <p class="qr-hint">Escanea con tu móvil</p>
           <p class="qr-url">{{ `${window.location.origin}/qr-auth?session=${qrSessionId}` }}</p>
-          <p class="qr-status" v-if="qrStatus === 'pending'">Esperando confirmación...</p>
+          <p class="qr-status" v-if="qrStatus === 'pending'">Esperando confirmación desde tu móvil...</p>
+          <p class="qr-status" v-else-if="qrStatus === 'expired'">Sesión expirada. Genera un nuevo código.</p>
         </div>
       </div>
 
@@ -331,6 +331,7 @@ onMounted(async () => {
 .method-tabs button.active { background: #1a1a2e; color: #fff; border-color: #1a1a2e; }
 .method-tabs button:disabled { opacity: 0.4; cursor: not-allowed; }
 .biometric-section, .pin-section, .qr-section { margin: 0.5rem 0 1rem; }
+.qr-desc { font-size: 0.85rem; color: #666; text-align: center; margin: 0 0 1rem; line-height: 1.4; }
 .btn-biometric {
   width: 100%;
   padding: 0.75rem;
