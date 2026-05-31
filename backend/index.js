@@ -452,7 +452,9 @@ app.post('/api/auth/qr/generate', authenticateToken, async (req, res) => {
             createdAt: Date.now(),
         });
         setTimeout(() => qrSessions.delete(sessionId), 5 * 60 * 1000);
-        res.json({ sessionId, expiresIn: 300 });
+        const frontendUrl = process.env.FRONTEND_URL || `${req.protocol}://${req.hostname}:5173`;
+        const qrUrl = `${frontendUrl}/qr-auth?session=${sessionId}`;
+        res.json({ sessionId, expiresIn: 300, qrUrl });
     } catch (error) {
         console.error('QR generate error:', error);
         res.status(500).json({ error: 'Error al generar QR' });
@@ -468,7 +470,9 @@ app.post('/api/auth/qr/login-init', async (req, res) => {
             createdAt: Date.now(),
         });
         setTimeout(() => qrSessions.delete(sessionId), 5 * 60 * 1000);
-        res.json({ sessionId, expiresIn: 300 });
+        const frontendUrl = process.env.FRONTEND_URL || `${req.protocol}://${req.hostname}:5173`;
+        const qrUrl = `${frontendUrl}/qr-auth?session=${sessionId}`;
+        res.json({ sessionId, expiresIn: 300, qrUrl });
     } catch (error) {
         console.error('QR login-init error:', error);
         res.status(500).json({ error: 'Error al generar QR' });

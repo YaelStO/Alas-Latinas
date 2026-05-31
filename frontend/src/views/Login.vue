@@ -134,7 +134,7 @@ async function handleQrLogin() {
     const res = await api.auth.qrLoginInit()
     qrSessionId.value = res.data.sessionId
     qrStatus.value = 'pending'
-    qrUrl.value = `${window.location.origin}/qr-auth?session=${res.data.sessionId}`
+    qrUrl.value = res.data.qrUrl
     await nextTick()
     const QRCode = await import('qrcode')
     if (qrCanvas.value) {
