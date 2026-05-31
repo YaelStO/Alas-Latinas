@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 import { canUsePlatformBiometric } from '../services/biometric'
@@ -23,6 +23,8 @@ const qrSessionId = ref('')
 const qrStatus = ref('')
 const qrPollTimer = ref(null)
 const qrLoading = ref(false)
+const qrUrl = ref('')
+const qrCanvas = ref(null)
 
 async function handleLogin() {
   error.value = ''
@@ -132,6 +134,14 @@ async function handleQrLogin() {
     const res = await api.auth.qrLoginInit()
     qrSessionId.value = res.data.sessionId
     qrStatus.value = 'pending'
+    qrUrl.value = `${window.location.origin}/qr-auth?session=${res.data.sessionId}`
+    await nextTick()
+    const QRCode = await import('qrcode')
+    if (qrCanvas.value) {
+      QRCode.toCanvas(qrCanvas.value, qrUrl.value, { width: 200, margin: 2 }, (err) => {
+        if (err) console.error('QR error:', err)
+      })
+    }
     qrPollTimer.value = setInterval(async () => {
       try {
         const statusRes = await api.auth.qrStatus(res.data.sessionId)
@@ -230,17 +240,10 @@ onMounted(async () => {
         </button>
         <div v-if="qrSessionId" class="qr-display">
           <div class="qr-box">
-            <div class="qr-code">
-              <div class="qr-pattern">
-                <div class="qr-corner tl"></div>
-                <div class="qr-corner tr"></div>
-                <div class="qr-corner bl"></div>
-                <div class="qr-center-dot"></div>
-              </div>
-            </div>
+            <canvas ref="qrCanvas" class="qr-canvas"></canvas>
           </div>
           <p class="qr-hint">Escanea con tu móvil</p>
-          <p class="qr-url">{{ `${window.location.origin}/qr-auth?session=${qrSessionId}` }}</p>
+          <p class="qr-url">{{ qrUrl }}</p>
           <p class="qr-status" v-if="qrStatus === 'pending'">Esperando confirmación desde tu móvil...</p>
           <p class="qr-status" v-else-if="qrStatus === 'expired'">Sesión expirada. Genera un nuevo código.</p>
         </div>
@@ -361,26 +364,8 @@ onMounted(async () => {
 .qr-box {
   display: flex; justify-content: center; margin: 1rem 0;
 }
-.qr-code {
-  width: 200px; height: 200px; background: #fff; border: 3px solid #1a1a2e;
-  border-radius: 12px; display: flex; align-items: center; justify-content: center;
-  position: relative;
-}
-.qr-pattern {
-  width: 160px; height: 160px; position: relative;
-  background: repeating-linear-gradient(0deg, #1a1a2e 0px, #1a1a2e 4px, #fff 4px, #fff 8px),
-              repeating-linear-gradient(90deg, #1a1a2e 0px, #1a1a2e 4px, #fff 4px, #fff 8px);
-  opacity: 0.3;
-}
-.qr-corner {
-  position: absolute; width: 40px; height: 40px; border: 4px solid #1a1a2e;
-}
-.qr-corner.tl { top: -10px; left: -10px; border-right: none; border-bottom: none; }
-.qr-corner.tr { top: -10px; right: -10px; border-left: none; border-bottom: none; }
-.qr-corner.bl { bottom: -10px; left: -10px; border-right: none; border-top: none; }
-.qr-center-dot {
-  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-  width: 24px; height: 24px; background: #1a1a2e; border-radius: 50%;
+.qr-canvas {
+  width: 200px; height: 200px; border: 3px solid #1a1a2e; border-radius: 12px;
 }
 .qr-hint { font-size: 0.85rem; color: #666; text-align: center; margin: 0.5rem 0; }
 .qr-url { font-size: 0.75rem; color: #4fc3f7; text-align: center; word-break: break-all; margin: 0; }

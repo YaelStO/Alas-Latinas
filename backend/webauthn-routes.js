@@ -20,6 +20,19 @@ function getRpConfig(req) {
     return { rpName: RP_NAME, rpID, origin };
 }
 
+function parseTransports(transports) {
+    if (!transports) return [];
+    if (Array.isArray(transports)) return transports;
+    if (typeof transports === 'string') {
+        try {
+            return JSON.parse(transports);
+        } catch {
+            return transports.split(',').map(t => t.trim()).filter(Boolean);
+        }
+    }
+    return [];
+}
+
 function storeChallenge(key, challenge) {
     challenges.set(key, { challenge, expires: Date.now() + CHALLENGE_TTL_MS });
 }
@@ -106,7 +119,7 @@ function registerWebAuthnRoutes(app, deps) {
                 },
                 excludeCredentials: existing.map((c) => ({
                     id: c.credential_id,
-                    transports: JSON.parse(c.transports || '[]'),
+                    transports: parseTransports(c.transports),
                 })),
             });
 
@@ -202,7 +215,7 @@ function registerWebAuthnRoutes(app, deps) {
                 rpID,
                 allowCredentials: credentials.map((c) => ({
                     id: c.credential_id,
-                    transports: JSON.parse(c.transports || '[]'),
+                    transports: parseTransports(c.transports),
                 })),
                 userVerification: 'required',
             });
@@ -244,7 +257,7 @@ function registerWebAuthnRoutes(app, deps) {
                     id: stored.credential_id,
                     publicKey: Buffer.from(stored.public_key, 'base64'),
                     counter: Number(stored.counter),
-                    transports: JSON.parse(stored.transports || '[]'),
+                    transports: parseTransports(stored.transports),
                 },
                 requireUserVerification: true,
             });

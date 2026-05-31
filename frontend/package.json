@@ -12,6 +12,7 @@
     "@simplewebauthn/browser": "^13.3.0",
     "axios": "^1.7.0",
     "pinia": "^2.1.0",
+    "qrcode": "^1.5.4",
     "vue": "^3.4.0",
     "vue-router": "^4.3.0"
   },
